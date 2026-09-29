@@ -9,6 +9,7 @@
 #include <lvgl.h>
 #include <atomic>
 #include <cstddef>
+#include <deque>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -119,6 +120,15 @@ private:
     std::vector<int16_t> _mic_samples;
     int _mic_rate = 0;
 
+    // Speaker: browser audio (binary 0x03) is resampled to the codec rate and
+    // queued; a task plays it, and the mouth moves while it does.
+    std::mutex _spk_mutex;
+    std::deque<int16_t> _spk_samples;
+    std::atomic<bool> _spk_running{false};
+    std::atomic<TaskHandle_t> _spk_task{nullptr};  // cleared by the task when it exits
+    std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec
+    uint32_t _speaking_until = 0;
+
     // Head gestures (nod, shake) as timed moves; auto angle sync is paused
     // while the head is commanded so hand-moved-angle tracking doesn't fight it.
     const GestureStep* _gesture = nullptr;
@@ -149,4 +159,7 @@ private:
     void stop_mic();
     static void mic_task(void* arg);
     void send_mic_audio();
+    void queue_speaker_audio(const std::string& payload);
+    void stop_speaker();
+    static void speaker_task(void* arg);
 };

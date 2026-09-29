@@ -57,6 +57,7 @@ static constexpr uint32_t _gesture_step_ms           = 260;
 // Binary message types (stackchan-server internal/wire)
 static constexpr uint8_t _bin_camera_jpeg = 0x01;
 static constexpr uint8_t _bin_audio_pcm   = 0x02;
+static constexpr uint8_t _bin_speaker_pcm = 0x03;
 static constexpr uint8_t _bin_show_jpeg   = 0x10;
 
 static constexpr uint32_t _camera_interval_ms = 200;  // up to 5 fps
@@ -119,7 +120,7 @@ void AppEmbodyMode::onOpen()
         .model     = "stackchan-cores3",
         .firmware  = esp_app_get_description()->version,
         .commands  = {"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-                      "sticker", "face", "image", "camera", "mic", "screensaver", "standby"},
+                      "sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker"},
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
     });
@@ -129,6 +130,8 @@ void AppEmbodyMode::onOpen()
     _client->onBinary = [this](uint8_t type, const std::string& payload) {
         if (type == _bin_show_jpeg) {
             _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock
+        } else if (type == _bin_speaker_pcm) {
+            queue_speaker_audio(payload);
         }
     };
     _client->collectTelemetry = [this]() {
@@ -237,6 +240,13 @@ void AppEmbodyMode::onRunning()
         }
     }
 
+    // Move the mouth while the speaker plays
+    const uint32_t now = GetHAL().millis();
+    if (now - _spk_last_audio < 300 && (int32_t)(now - _speaking_until) > -200 && GetStackChan().hasAvatar()) {
+        GetStackChan().addModifier(std::make_unique<SpeakingModifier>(800));
+        _speaking_until = now + 800;
+    }
+
     update_motion();
     render();
     update_standby();
@@ -251,6 +261,7 @@ void AppEmbodyMode::onClose()
     mclog::tagInfo(_tag, "on close");
 
     stop_mic();
+    stop_speaker();
     _camera_on = false;
     if (_client) {
         GetHAL().onImuMotionEvent.disconnect(_imu_connection);
@@ -850,6 +861,7 @@ void AppEmbodyMode::start_standby(int minutes)
 {
     minutes = std::clamp(minutes, 1, 120);
     stop_mic();
+    stop_speaker();
     _camera_on = false;
     auto& sc   = GetStackChan();
     sc.leftNeonLight().setColor((uint32_t)0);
@@ -886,4 +898,112 @@ void AppEmbodyMode::update_standby()
         _client->wakeNow();
     }
     mclog::tagInfo(_tag, "standby end ({})", touched ? "touch" : "timeout");
+}
+
+/* --------------------------------- Speaker -------------------------------- */
+
+// Browser audio: sample rate (uint16 LE), then s16le mono. Resampled to the
+// codec rate and queued (at most ~3 s; the oldest audio goes first). Main loop.
+void AppEmbodyMode::queue_speaker_audio(const std::string& payload)
+{
+    auto codec = Board::GetInstance().GetAudioCodec();
+    if (!codec || payload.size() < 4) {
+        return;
+    }
+    const int in_rate  = (uint8_t)payload[0] | ((uint8_t)payload[1] << 8);
+    const int out_rate = codec->output_sample_rate();
+    const size_t n_in  = (payload.size() - 2) / 2;
+    if (in_rate <= 0 || out_rate <= 0 || n_in == 0) {
+        return;
+    }
+    auto sample = [&](size_t i) {
+        int16_t s;
+        std::memcpy(&s, payload.data() + 2 + i * 2, 2);
+        return s;
+    };
+    const size_t n_out = (size_t)((uint64_t)n_in * out_rate / in_rate);
+    {
+        std::lock_guard<std::mutex> lock(_spk_mutex);
+        for (size_t i = 0; i < n_out; i++) {  // linear interpolation
+            float x  = (float)i * in_rate / out_rate;
+            size_t j = (size_t)x;
+            float t  = x - j;
+            int16_t a = sample(std::min(j, n_in - 1)), b = sample(std::min(j + 1, n_in - 1));
+            _spk_samples.push_back((int16_t)(a + (b - a) * t));
+        }
+        const size_t max_samples = (size_t)out_rate * 3;
+        while (_spk_samples.size() > max_samples) {
+            _spk_samples.pop_front();
+        }
+    }
+    _last_activity = GetHAL().millis();  // someone is talking through the robot
+
+    if (!_spk_running) {
+        _spk_running = true;
+        TaskHandle_t handle = nullptr;
+        if (xTaskCreate(speaker_task, "embody_spk", 4096, this, 5, &handle) != pdPASS) {
+            _spk_running = false;
+            mclog::tagError(_tag, "speaker: task create failed");
+            return;
+        }
+        _spk_task = handle;
+        mclog::tagInfo(_tag, "speaker on, {} Hz from {} Hz", out_rate, in_rate);
+    }
+}
+
+void AppEmbodyMode::stop_speaker()
+{
+    if (!_spk_running) {
+        return;
+    }
+    _spk_running = false;
+    for (int i = 0; i < 50 && _spk_task != nullptr; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    std::lock_guard<std::mutex> lock(_spk_mutex);
+    _spk_samples.clear();
+}
+
+// Plays queued audio in 20 ms chunks; switches the codec output off after
+// 0.5 s of silence.
+void AppEmbodyMode::speaker_task(void* arg)
+{
+    auto* self  = static_cast<AppEmbodyMode*>(arg);
+    auto codec  = Board::GetInstance().GetAudioCodec();
+    const size_t chunk_len = codec->output_sample_rate() / 50;
+    std::vector<int16_t> chunk;
+    chunk.reserve(chunk_len);
+    bool enabled        = false;
+    uint32_t idle_since = GetHAL().millis();
+
+    while (self->_spk_running) {
+        chunk.clear();
+        {
+            std::lock_guard<std::mutex> lock(self->_spk_mutex);
+            while (!self->_spk_samples.empty() && chunk.size() < chunk_len) {
+                chunk.push_back(self->_spk_samples.front());
+                self->_spk_samples.pop_front();
+            }
+        }
+        if (!chunk.empty()) {
+            if (!enabled) {
+                codec->EnableOutput(true);
+                enabled = true;
+            }
+            codec->OutputData(chunk);  // blocks for about the chunk's duration
+            idle_since            = GetHAL().millis();
+            self->_spk_last_audio = idle_since;
+        } else {
+            if (enabled && GetHAL().millis() - idle_since > 500) {
+                codec->EnableOutput(false);
+                enabled = false;
+            }
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    if (enabled) {
+        codec->EnableOutput(false);
+    }
+    self->_spk_task = nullptr;
+    vTaskDelete(nullptr);
 }
