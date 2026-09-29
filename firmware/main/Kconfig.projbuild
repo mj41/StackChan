@@ -1004,3 +1004,22 @@ menu "BLE prph Configuration"
             Use this option to enable resolving peer's address.
 
 endmenu
+
+menu "Embody Mode"
+
+config STACKCHAN_EMBODY_SERVER_URL
+    string "Embody server base URL"
+    default ""
+    help
+        Base URL of stackchan-server (ws:// or wss://, no trailing slash),
+        e.g. ws://192.168.1.10:8765. Empty disables Embody Mode networking.
+        Set it in sdkconfig.defaults.local.
+
+config STACKCHAN_EMBODY_TOKEN
+    string "Embody robot token"
+    default ""
+    help
+        Shared robot bearer token, the content of the server's robot-token
+        file. Keep it in sdkconfig.defaults.local, which is gitignored.
+
+endmenu
