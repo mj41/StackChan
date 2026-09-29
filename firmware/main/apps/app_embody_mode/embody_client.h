@@ -39,6 +39,7 @@ public:
     };
 
     using Telemetry = std::vector<std::pair<std::string, float>>;
+    using Texts     = std::vector<std::pair<std::string, std::string>>;
 
     explicit Client(Config config);
     ~Client();
@@ -84,8 +85,8 @@ public:
     std::function<void(uint8_t type, const std::string& payload)> onBinary;
 
     // Report something that happened on the robot, e.g. "shake", optionally with
-    // numeric data such as {x, y}. Dropped while offline.
-    void sendEvent(const std::string& name, const Telemetry& data = {});
+    // numeric data such as {x, y} and text data such as {uid}. Dropped while offline.
+    void sendEvent(const std::string& name, const Telemetry& data = {}, const Texts& text = {});
 
     // Send a binary message (type byte + payload), e.g. a camera frame. Main loop only.
     bool sendBinary(uint8_t type, const uint8_t* data, size_t len);

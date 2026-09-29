@@ -248,7 +248,7 @@ void Client::send_telemetry()
     send(frame);
 }
 
-void Client::sendEvent(const std::string& name, const Telemetry& data)
+void Client::sendEvent(const std::string& name, const Telemetry& data, const Texts& text)
 {
     if (_state != State::Registered) {
         return;
@@ -257,9 +257,12 @@ void Client::sendEvent(const std::string& name, const Telemetry& data)
     doc["kind"] = "RobotEvent";
     doc["meta"].to<ArduinoJson::JsonObject>();
     doc["body"]["name"] = name;
-    if (!data.empty()) {
+    if (!data.empty() || !text.empty()) {
         auto obj = doc["body"]["data"].to<ArduinoJson::JsonObject>();
         for (const auto& [key, value] : data) {
+            obj[key] = value;
+        }
+        for (const auto& [key, value] : text) {
             obj[key] = value;
         }
     }

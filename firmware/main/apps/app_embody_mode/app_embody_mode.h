@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "embody_client.h"
+#include <hal/drivers/ST25R3916/st25r3916.h>
 #include <mooncake.h>
 #include <lvgl.h>
 #include <atomic>
@@ -34,7 +35,8 @@ class Label;
  * press brings the QR back, a tap is reported as a "screen_tap" event.
  * Handles the basic command set (see stackchan-server internal/wire), shows
  * pictures sent from the phone, streams camera and microphone while someone
- * watches, streams telemetry and reports robot events.
+ * watches, plays browser audio, streams telemetry and reports robot events
+ * (touch, IMU, NFC tags).
  */
 class AppEmbodyMode : public mooncake::AppAbility {
 public:
@@ -103,9 +105,14 @@ private:
     // afterwards under it.
     std::vector<std::pair<std::string, std::string>> _pending_commands;
 
-    // Robot events come from HAL tasks (IMU, head touch) and LVGL callbacks (taps).
+    // Robot events come from HAL tasks (IMU, head touch), the NFC task and LVGL callbacks (taps).
+    struct PendingEvent {
+        std::string name;
+        embody::Client::Telemetry data;
+        embody::Client::Texts text;
+    };
     std::mutex _event_mutex;
-    std::vector<std::pair<std::string, embody::Client::Telemetry>> _pending_events;
+    std::vector<PendingEvent> _pending_events;
     size_t _imu_connection = 0;
     size_t _head_connection = 0;
 
@@ -129,6 +136,14 @@ private:
     std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec
     uint32_t _speaking_until = 0;
 
+    // NFC: a task polls the ST25R3916 reader (the RF field is on only while it
+    // polls) and reports "nfc_tag" / "nfc_removed" events. On by default when
+    // the reader answers; the "nfc" command switches polling.
+    std::unique_ptr<ST25R3916> _nfc;
+    bool _nfc_enabled = false;
+    std::atomic<bool> _nfc_running{false};
+    std::atomic<TaskHandle_t> _nfc_task{nullptr};  // cleared by the task when it exits
+
     // Head gestures (nod, shake) as timed moves; auto angle sync is paused
     // while the head is commanded so hand-moved-angle tracking doesn't fight it.
     const GestureStep* _gesture = nullptr;
@@ -149,7 +164,7 @@ private:
     void leave_blank();
     void wake_screen();
     void run_command(const std::string& command, const std::string& args);
-    void queue_event(const char* name, embody::Client::Telemetry data = {});
+    void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();
     void start_gesture(const GestureStep* steps, size_t count);
@@ -162,4 +177,7 @@ private:
     void queue_speaker_audio(const std::string& payload);
     void stop_speaker();
     static void speaker_task(void* arg);
+    void start_nfc();
+    void stop_nfc();
+    static void nfc_task(void* arg);
 };

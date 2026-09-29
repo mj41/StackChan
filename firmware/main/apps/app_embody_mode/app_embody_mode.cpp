@@ -27,6 +27,7 @@
 #include <sdkconfig.h>
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <iterator>
@@ -113,14 +114,26 @@ void AppEmbodyMode::onOpen()
     auto robot_id = "stackchan-" + GetHAL().getFactoryMacString();
     std::transform(robot_id.begin(), robot_id.end(), robot_id.begin(), [](unsigned char c) { return std::tolower(c); });
 
+    // NFC reader (ST25R3916 on the internal I2C bus): "nfc" is offered only when it answers.
+    _nfc = std::make_unique<ST25R3916>();
+    if (!_nfc->begin(hal_bridge::board_get_i2c_bus())) {
+        mclog::tagWarn(_tag, "nfc: no ST25R3916 reader");
+        _nfc.reset();
+    }
+    std::vector<std::string> commands = {"ping",    "nod",  "shake", "look",   "home", "emotion",     "say",
+                                         "leds",    "brightness", "volume", "sticker", "face", "image",
+                                         "camera",  "mic",  "screensaver", "standby", "speaker"};
+    if (_nfc) {
+        commands.push_back("nfc");
+    }
+
     _client = std::make_unique<embody::Client>(embody::Client::Config{
         .serverUrl = server_url,
         .token     = CONFIG_STACKCHAN_EMBODY_TOKEN,
         .robotId   = robot_id,
         .model     = "stackchan-cores3",
         .firmware  = esp_app_get_description()->version,
-        .commands  = {"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-                      "sticker", "face", "image", "camera", "mic", "screensaver", "standby", "speaker"},
+        .commands  = commands,
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
     });
@@ -172,6 +185,11 @@ void AppEmbodyMode::onOpen()
                 break;
         }
     });
+
+    if (_nfc) {
+        _nfc_enabled = true;
+        start_nfc();
+    }
 }
 
 void AppEmbodyMode::onRunning()
@@ -190,13 +208,13 @@ void AppEmbodyMode::onRunning()
         }
 
         // Events wait while offline (e.g. during standby) and go out after reconnecting.
-        std::vector<std::pair<std::string, embody::Client::Telemetry>> events;
+        std::vector<PendingEvent> events;
         if (_client->isRegistered()) {
             std::lock_guard<std::mutex> lock(_event_mutex);
             events.swap(_pending_events);
         }
-        for (const auto& [name, data] : events) {
-            _client->sendEvent(name, data);
+        for (const auto& event : events) {
+            _client->sendEvent(event.name, event.data, event.text);
         }
         if (_standby_disconnect) {  // the "standby" event is out; now go offline
             _standby_disconnect = false;
@@ -262,6 +280,9 @@ void AppEmbodyMode::onClose()
 
     stop_mic();
     stop_speaker();
+    stop_nfc();
+    _nfc.reset();
+    _nfc_enabled = false;
     _camera_on = false;
     if (_client) {
         GetHAL().onImuMotionEvent.disconnect(_imu_connection);
@@ -484,11 +505,11 @@ void AppEmbodyMode::render()
     }
 }
 
-void AppEmbodyMode::queue_event(const char* name, embody::Client::Telemetry data)
+void AppEmbodyMode::queue_event(const char* name, embody::Client::Telemetry data, embody::Client::Texts text)
 {
     std::lock_guard<std::mutex> lock(_event_mutex);
     if (_pending_events.size() < 16) {
-        _pending_events.emplace_back(name, std::move(data));
+        _pending_events.push_back({name, std::move(data), std::move(text)});
     }
 }
 
@@ -590,6 +611,9 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         mclog::tagInfo(_tag, "camera {}", _camera_on ? "on" : "off");
     } else if (command == "mic") {
         (args["on"] | false) ? start_mic() : stop_mic();
+    } else if (command == "nfc") {
+        _nfc_enabled = _nfc && (args["on"] | true);
+        _nfc_enabled ? start_nfc() : stop_nfc();
     } else if (command == "leds") {
         uint32_t color = 0;
         if (parse_hex_color(args["left"] | "", color)) {
@@ -862,6 +886,7 @@ void AppEmbodyMode::start_standby(int minutes)
     minutes = std::clamp(minutes, 1, 120);
     stop_mic();
     stop_speaker();
+    stop_nfc();
     _camera_on = false;
     auto& sc   = GetStackChan();
     sc.leftNeonLight().setColor((uint32_t)0);
@@ -894,6 +919,9 @@ void AppEmbodyMode::update_standby()
     GetHAL().setBackLightBrightness(_standby_brightness);
     leave_blank();
     queue_event("standby_end", {{"touched", touched ? 1.0f : 0.0f}});
+    if (_nfc_enabled) {
+        start_nfc();
+    }
     if (_client) {
         _client->wakeNow();
     }
@@ -1005,5 +1033,100 @@ void AppEmbodyMode::speaker_task(void* arg)
         codec->EnableOutput(false);
     }
     self->_spk_task = nullptr;
+    vTaskDelete(nullptr);
+}
+
+/* ----------------------------------- NFC ---------------------------------- */
+
+void AppEmbodyMode::start_nfc()
+{
+    if (!_nfc || _nfc_running) {
+        return;
+    }
+    _nfc_running        = true;
+    TaskHandle_t handle = nullptr;
+    // Priority 1 on core 1: the driver busy-waits a few ms per step; this keeps it
+    // below head touch (priority 2) and away from the app loop (core 0).
+    if (xTaskCreatePinnedToCore(nfc_task, "embody_nfc", 4096, this, 1, &handle, 1) != pdPASS) {
+        _nfc_running = false;
+        mclog::tagError(_tag, "nfc: task create failed");
+        return;
+    }
+    _nfc_task = handle;
+    mclog::tagInfo(_tag, "nfc on");
+}
+
+void AppEmbodyMode::stop_nfc()
+{
+    if (!_nfc_running) {
+        return;
+    }
+    _nfc_running = false;
+    // The task switches the field off and clears _nfc_task when it exits.
+    for (int i = 0; i < 100 && _nfc_task != nullptr; i++) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    mclog::tagInfo(_tag, "nfc off");
+}
+
+static const char* nfc_tag_type(uint8_t sak)
+{
+    switch (sak) {
+        case 0x00:
+            return "type2";  // NTAG, MIFARE Ultralight
+        case 0x08:
+            return "mifare_classic_1k";
+        case 0x09:
+            return "mifare_mini";
+        case 0x18:
+            return "mifare_classic_4k";
+        default:
+            return (sak & 0x20) ? "iso14443_4" : "unknown";  // e.g. phones, bank cards, DESFire
+    }
+}
+
+// Polls twice a second with the RF field on only while reading. A new tag is
+// reported once, with the text of its first NDEF record for Type 2 tags; two
+// missed polls in a row mean it is gone.
+void AppEmbodyMode::nfc_task(void* arg)
+{
+    auto* self = static_cast<AppEmbodyMode*>(arg);
+    auto& nfc  = *self->_nfc;
+    std::string present;
+    int misses = 0;
+
+    while (self->_nfc_running) {
+        ST25R3916::Tag tag;
+        nfc.fieldOn();
+        if (nfc.readUid(tag)) {
+            misses = 0;
+            std::string uid;
+            for (uint8_t i = 0; i < tag.uidLen; i++) {
+                char b[4];
+                std::snprintf(b, sizeof(b), i ? ":%02X" : "%02X", tag.uid[i]);
+                uid += b;
+            }
+            if (uid != present) {
+                const std::string text = tag.sak == 0x00 ? nfc.readNdefText() : "";
+                nfc.halt();
+                present = uid;
+                embody::Client::Texts info = {{"uid", uid}, {"type", nfc_tag_type(tag.sak)}};
+                if (!text.empty()) {
+                    info.emplace_back("text", text);
+                }
+                self->queue_event("nfc_tag", {{"atqa", (float)tag.atqa}, {"sak", (float)tag.sak}}, std::move(info));
+                mclog::tagInfo(_tag, "nfc tag {} ({}) {}", uid, nfc_tag_type(tag.sak), text);
+            }
+        } else if (!present.empty() && ++misses >= 2) {
+            self->queue_event("nfc_removed", {}, {{"uid", present}});
+            mclog::tagInfo(_tag, "nfc tag {} removed", present);
+            present.clear();
+        }
+        nfc.fieldOff();
+        for (int i = 0; i < 50 && self->_nfc_running; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
+    }
+    self->_nfc_task = nullptr;
     vTaskDelete(nullptr);
 }

@@ -44,13 +44,14 @@ Other options in the same menu:
 
 | Area | Details |
 |---|---|
-| Commands | `ping` (answered in `embody_client` with the queue time), `nod`, `shake`, `look`, `home`, `emotion`, `say`, `sticker`, `face`, `leds`, `brightness`, `volume`, `screensaver`, `standby`, `camera`, `mic`, and the `speaker` capability (audio arrives as binary `0x03`). Pitch is clamped to 5–85° (M5Stack safe range) |
+| Commands | `ping` (answered in `embody_client` with the queue time), `nod`, `shake`, `look`, `home`, `emotion`, `say`, `sticker`, `face`, `leds`, `brightness`, `volume`, `screensaver`, `standby`, `camera`, `mic`, `nfc`, and the `speaker` capability (audio arrives as binary `0x03`). `nfc` is listed only when the reader answers at startup. Pitch is clamped to 5–85° (M5Stack safe range) |
 | Pictures | binary `0x10` JPEG, decoded with `jpeg_dec::decode_to_lvgl` and shown over the face |
 | Camera | `StreamCaptures()`, then `image_to_jpeg` (quality 25), sent as binary `0x01` every 200 ms while on |
 | Microphone | a FreeRTOS task reads the audio codec at 24 kHz, channel 1 (as in the SETUP mic test). Sent as binary `0x02` in 50 ms messages |
 | Speaker | binary `0x03` PCM is resampled to the codec's 24 kHz and queued (max ~3 s). A FreeRTOS task writes 20 ms chunks with `OutputData` and switches output off after 0.5 s of silence. The mouth moves while it plays, and the audio counts as use for the screensaver |
+| NFC | `hal/drivers/ST25R3916`: a minimal ISO14443A reader ported from M5Stack's UiFlow2 driver (MIT). A FreeRTOS task (priority 1, core 1) polls twice a second with the RF field on only for the ~30 ms of each poll; the chip's IRQ pin isn't wired on StackChan. It reads 4- and 7-byte UIDs and, for Type 2 tags (NTAG, Ultralight), the first NDEF record (URI or text). It stops during standby. `nfc {"on"}` switches polling (on by default) |
 | Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1) |
-| Events | IMU shake, head-touch press and swipes, screen taps, screensaver on/off |
+| Events | IMU shake, head-touch press and swipes, screen taps, screensaver on/off, standby, `nfc_tag {uid, type, atqa, sak, text}` and `nfc_removed {uid}` (after two missed polls) |
 
 ## Code
 
@@ -59,7 +60,7 @@ Other options in the same menu:
   - It reconnects with backoff from 1 s up to 30 s.
 - `app_embody_mode.{h,cpp}`: UI, commands, motion gestures, pictures, camera and microphone.
   - Commands and pictures are queued during `update()` and applied under the LVGL lock.
-  - Events from HAL tasks and LVGL callbacks go through a mutex-protected queue.
+  - Events from HAL tasks, the NFC task and LVGL callbacks go through a mutex-protected queue. Event data can hold numbers and strings.
 
 ## Notes
 
