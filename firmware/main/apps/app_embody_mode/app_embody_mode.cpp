@@ -121,6 +121,14 @@ void AppEmbodyMode::onOpen()
         mclog::tagWarn(_tag, "nfc: no ST25R3916 reader");
         _nfc.reset();
     }
+    // Light/proximity sensor in the CoreS3: auto-brightness is on when it answers.
+    _light = std::make_unique<LTR553>();
+    if (!_light->begin(hal_bridge::board_get_i2c_bus())) {
+        mclog::tagWarn(_tag, "light: no LTR-553");
+        _light.reset();
+    }
+    _auto_brightness = _light != nullptr;
+
     std::vector<std::string> commands = {"ping",    "nod",  "shake", "look",   "home", "emotion",     "say",
                                          "leds",    "brightness", "volume", "sticker", "face", "image",
                                          "camera",  "mic",  "screensaver", "standby", "speaker"};
@@ -138,7 +146,8 @@ void AppEmbodyMode::onOpen()
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
                          "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
-                         "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c"},
+                         "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
+                         "proximity", "auto_brightness"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -261,6 +270,7 @@ void AppEmbodyMode::onRunning()
     }
 
     update_leds();
+    update_light();
 
     LvglLockGuard lock;
     for (const auto& [command, args] : _pending_commands) {
@@ -307,6 +317,7 @@ void AppEmbodyMode::onClose()
     _nfc.reset();
     _nfc_enabled = false;
     stop_led_effect(false);
+    _light.reset();  // standby: the IR LED stops
     if (_tsens) {
         temperature_sensor_disable(_tsens);
         temperature_sensor_uninstall(_tsens);
@@ -560,6 +571,14 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         t.emplace_back("pitch_temp_c", (float)servo.temperature);
     }
 
+    if (_light) {
+        if (_lux >= 0) {
+            t.emplace_back("light_lux", round_to(_lux, _lux < 10 ? 0.1f : 1.0f));
+        }
+        t.emplace_back("proximity", (float)_proximity);
+        t.emplace_back("auto_brightness", _auto_brightness ? 1.0f : 0.0f);
+    }
+
     float celsius = 0;
     if (_tsens && temperature_sensor_get_celsius(_tsens, &celsius) == ESP_OK) {
         t.emplace_back("chip_temp_c", round_to(celsius, 0.1f));
@@ -678,7 +697,15 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
     } else if (command == "leds") {
         run_leds(args);
     } else if (command == "brightness") {
-        GetHAL().setBackLightBrightness(std::clamp(args["value"] | 60, 1, 100));
+        // {"value": 1..100} sets it by hand and ends auto; {"auto": bool} switches auto.
+        if (args["value"].is<int>() || args["value"].is<float>()) {
+            _auto_brightness = false;
+            GetHAL().setBackLightBrightness(std::clamp(args["value"] | 60, 1, 100));
+        }
+        if (args["auto"].is<bool>()) {
+            _auto_brightness  = _light && args["auto"].as<bool>();
+            _last_light_read = 0;  // apply now
+        }
     } else if (command == "volume") {
         GetHAL().setSpeakerVolume(std::clamp(args["value"] | 50, 0, 100));
     } else {
@@ -1097,6 +1124,67 @@ void AppEmbodyMode::speaker_task(void* arg)
     }
     self->_spk_task = nullptr;
     vTaskDelete(nullptr);
+}
+
+/* ----------------------------- Light, proximity ---------------------------- */
+
+static constexpr uint32_t _prox_interval_ms  = 200;
+static constexpr uint32_t _light_interval_ms = 500;
+// Proximity above the "nobody near" baseline: enter near / leave near (hysteresis).
+static constexpr float _prox_near_delta = 150;
+static constexpr float _prox_far_delta  = 60;
+
+// Room light to backlight: 10 % in the dark, about 55 % at 100 lux (a living
+// room), 100 % from 10k lux (daylight).
+static int brightness_for_lux(float lux)
+{
+    return std::clamp((int)std::lround(10 + 22.5f * std::log10(std::max(lux, 1.0f))), 10, 100);
+}
+
+void AppEmbodyMode::update_light()
+{
+    if (!_light) {
+        return;
+    }
+    const uint32_t now = GetHAL().millis();
+
+    uint16_t ps = 0;
+    if (now - _last_prox_read >= _prox_interval_ms && _light->readProximity(ps)) {
+        _last_prox_read = now;
+        _proximity      = ps;
+        if (_prox_base < 0) {
+            _prox_base = ps;
+        }
+        if (!_near && ps > _prox_base + _prox_near_delta) {
+            _near = true;
+            if (!_standby_until) {  // someone came close: wake like a touch (standby keeps sleeping)
+                _last_physical = now;
+            }
+            queue_event("proximity_near", {{"value", (float)ps}});
+        } else if (_near && ps < _prox_base + _prox_far_delta) {
+            _near = false;
+            queue_event("proximity_far", {{"value", (float)ps}});
+        }
+        // The baseline follows drops at once and rises slowly (~40 s), so
+        // reflections from the cover glass or a wall nearby don't count as "near".
+        if (ps < _prox_base) {
+            _prox_base = ps;
+        } else if (!_near) {
+            _prox_base += (ps - _prox_base) * 0.005f;
+        }
+    }
+
+    float lux = 0;
+    if (now - _last_light_read >= _light_interval_ms && _light->readLux(lux)) {
+        _last_light_read = now;
+        _lux             = _lux < 0 ? lux : _lux + (lux - _lux) * 0.3f;
+        if (_auto_brightness && !_standby_until) {
+            const int target = brightness_for_lux(_lux);
+            if (std::abs(target - (int)GetHAL().getBackLightBrightness()) >= 4) {
+                GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
+            }
+        }
+    }
 }
 
 /* ---------------------------------- LEDs ---------------------------------- */

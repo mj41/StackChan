@@ -6,6 +6,7 @@
 #pragma once
 #include "embody_client.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
+#include <hal/drivers/LTR553/ltr553.h>
 #include <mooncake.h>
 #include <lvgl.h>
 #include <atomic>
@@ -122,6 +123,18 @@ private:
     size_t _head_connection = 0;
     uint32_t _head_press_ms = 0;  // head-touch task only
 
+    // Light + proximity (LTR-553 in the CoreS3), read in the app loop:
+    // telemetry, auto-brightness from the room light (on by default), and an
+    // approach wakes the screen like a touch.
+    std::unique_ptr<LTR553> _light;
+    bool _auto_brightness     = false;
+    float _lux                = -1;  // smoothed; < 0 until the first reading
+    uint16_t _proximity       = 0;
+    float _prox_base          = -1;  // slowly adapting "nobody near" level
+    bool _near                = false;
+    uint32_t _last_light_read = 0;
+    uint32_t _last_prox_read  = 0;
+
     // ESP32-S3 internal temperature sensor, for the chip_temp_c measurement.
     temperature_sensor_handle_t _tsens = nullptr;
 
@@ -187,6 +200,7 @@ private:
     uint32_t touch_idle_ms();
     void run_command(const std::string& command, const std::string& args);
     void add_sensor_telemetry(embody::Client::Telemetry& t);
+    void update_light();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();
