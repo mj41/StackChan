@@ -1022,6 +1022,22 @@ config STACKCHAN_EMBODY_TOKEN
         Shared robot bearer token, the content of the server's robot-token
         file. Keep it in sdkconfig.defaults.local, which is gitignored.
 
+config STACKCHAN_EMBODY_SCREENSAVER_S
+    int "Screensaver after this many seconds without touch (0 = never)"
+    default 60
+    range 0 3600
+    help
+        Embody Mode blanks the screen (black) after this long without
+        a touch and reports screensaver_on / screensaver_off events. A touch,
+        or a command that changes the screen, returns to the previous view.
+
+config STACKCHAN_EMBODY_ONLY
+    bool "Launcher shows only Embody Mode and SETUP"
+    default n
+    help
+        Installs only Embody Mode and SETUP, and ignores the
+        "start AI.AGENT on boot" setting. For robots used only remotely.
+
 endmenu
 
 menu "StackChan firmware updates"

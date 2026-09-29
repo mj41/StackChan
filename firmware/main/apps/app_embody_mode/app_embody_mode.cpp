@@ -120,7 +120,7 @@ void AppEmbodyMode::onOpen()
         .commands  = {"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
                       "sticker", "face", "image", "camera", "mic"},
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
-                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct"},
+                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -130,7 +130,7 @@ void AppEmbodyMode::onOpen()
             _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock
         }
     };
-    _client->collectTelemetry = []() {
+    _client->collectTelemetry = [this]() {
         auto& motion = GetStackChan().motion();
         return embody::Client::Telemetry{
             {"battery_pct", (float)GetHAL().getBatteryLevel()},
@@ -142,6 +142,7 @@ void AppEmbodyMode::onOpen()
             {"uptime_s", (float)(esp_timer_get_time() / 1000000)},
             {"brightness_pct", (float)GetHAL().getBackLightBrightness()},
             {"volume_pct", (float)GetHAL().getSpeakerVolume()},
+            {"screensaver", _blank_screen ? 1.0f : 0.0f},
         };
     };
 
@@ -212,6 +213,7 @@ void AppEmbodyMode::onRunning()
         _picture = std::move(_pending_picture);  // keep the pixels alive while shown
         lv_image_set_src(_picture_obj, _picture->image_dsc());
         lv_obj_remove_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
+        wake_screen();
     }
     if (_live_badge) {
         bool live = _camera_on || _mic_running;
@@ -222,6 +224,7 @@ void AppEmbodyMode::onRunning()
 
     update_motion();
     render();
+    update_screensaver();
     GetStackChan().update();
     view::update_home_indicator();
     view::update_status_bar();
@@ -242,6 +245,11 @@ void AppEmbodyMode::onClose()
 
     {
         LvglLockGuard lock;
+        if (_blank_screen) {  // load the Embody screen back before its objects are deleted
+            lv_screen_load(_prev_screen);
+            lv_obj_delete(_blank_screen);
+            _blank_screen = nullptr;
+        }
         GetStackChan().clearModifiers();
         GetStackChan().resetAvatar();
         if (_live_badge) {
@@ -405,6 +413,7 @@ void AppEmbodyMode::render()
     if (_client->viewers() > 0 && _rendered_viewers == 0) {
         _qr_visible = false;
         changed     = true;
+        wake_screen();
     }
     _rendered_viewers = _client->viewers();
     if (_toggle_qr_requested.exchange(false) && _client->isRegistered()) {
@@ -474,6 +483,9 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
     if (command != "camera" && command != "mic") {  // those come from the server, not the user
         _last_command      = command;
         _rendered_revision = UINT32_MAX;  // refresh "Last: ..."
+    }
+    if (command == "emotion" || command == "say" || command == "sticker" || command == "face") {
+        wake_screen();  // the change should be visible, not hidden behind the screensaver
     }
 
     auto& sc     = GetStackChan();
@@ -728,4 +740,43 @@ void AppEmbodyMode::update_motion()
         GetStackChan().motion().setAutoAngleSyncEnabled(true);
         _angle_sync_paused = false;
     }
+}
+
+/* ------------------------------- Screensaver ------------------------------- */
+
+// After CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S without touch, load a blank
+// (black) screen; any touch, or wake_screen(), loads the Embody screen back.
+// The top layer (LIVE badge) stays visible. Runs under the LVGL lock.
+void AppEmbodyMode::update_screensaver()
+{
+#if CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S > 0
+    if (!_panel) {
+        return;
+    }
+    const uint32_t timeout_ms = CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S * 1000u;
+    if (lv_display_get_inactive_time(nullptr) >= timeout_ms) {
+        if (!_blank_screen) {
+            _prev_screen  = lv_screen_active();
+            _blank_screen = lv_obj_create(nullptr);
+            lv_obj_set_style_bg_color(_blank_screen, lv_color_hex(0x000000), 0);
+            lv_obj_set_style_bg_opa(_blank_screen, LV_OPA_COVER, 0);
+            lv_obj_remove_flag(_blank_screen, LV_OBJ_FLAG_SCROLLABLE);
+            lv_screen_load(_blank_screen);
+            queue_event("screensaver_on");
+            mclog::tagInfo(_tag, "screensaver on");
+        }
+    } else if (_blank_screen) {
+        lv_screen_load(_prev_screen);
+        lv_obj_delete(_blank_screen);
+        _blank_screen = nullptr;
+        queue_event("screensaver_off");
+        mclog::tagInfo(_tag, "screensaver off");
+    }
+#endif
+}
+
+// Counts as user activity, so the screensaver closes on the next update.
+void AppEmbodyMode::wake_screen()
+{
+    lv_display_trigger_activity(nullptr);
 }

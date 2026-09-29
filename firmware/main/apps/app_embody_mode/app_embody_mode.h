@@ -72,6 +72,11 @@ private:
     // "LIVE" badge on the top layer while the camera or microphone streams
     lv_obj_t* _live_badge = nullptr;
 
+    // Screensaver: a blank screen after CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S without touch.
+    // The Embody screen stays intact underneath and is loaded back on wake.
+    lv_obj_t* _blank_screen = nullptr;
+    lv_obj_t* _prev_screen  = nullptr;
+
     bool _qr_visible = true;
     int _rendered_viewers = 0;
     std::atomic<bool> _toggle_qr_requested{false};  // set from LVGL event callbacks
@@ -113,6 +118,8 @@ private:
 
     void create_view();
     void render();
+    void update_screensaver();
+    void wake_screen();
     void run_command(const std::string& command, const std::string& args);
     void queue_event(const char* name, embody::Client::Telemetry data = {});
     static void on_screen_event(lv_event_t* e);

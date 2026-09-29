@@ -9,6 +9,7 @@
 #include <mooncake.h>
 #include <apps/apps.h>
 #include <hal/hal.h>
+#include <sdkconfig.h>
 
 using namespace mooncake;
 using namespace smooth_ui_toolkit;
@@ -26,19 +27,28 @@ extern "C" void app_main(void)
     ui_hal::on_delay([](uint32_t ms) { GetHAL().delay(ms); });
     ui_hal::on_get_tick([]() { return GetHAL().millis(); });
 
+#ifdef CONFIG_STACKCHAN_EMBODY_ONLY
+    // Embody-only: no AI.AGENT, so its start-on-boot setting is ignored.
+    const bool skip_mooncake = false;
+#else
     const bool skip_mooncake =
         GetHAL().getXiaozhiConfig().startAiAgentOnBoot && GetHAL().getWarmRebootTarget() < 0;
+#endif
 
     if (!skip_mooncake) {
         // Install apps
         GetMooncake().installApp(std::make_unique<AppLauncher>());
         GetMooncake().installApp(std::make_unique<AppEmbodyMode>());
+#ifndef CONFIG_STACKCHAN_EMBODY_ONLY
         GetMooncake().installApp(std::make_unique<AppAiAgent>());
         GetMooncake().installApp(std::make_unique<AppAvatar>());
         GetMooncake().installApp(std::make_unique<AppEspnowControl>());
         GetMooncake().installApp(std::make_unique<AppAppCenter>());
         GetMooncake().installApp(std::make_unique<AppEzdata>());
         GetMooncake().installApp(std::make_unique<AppDance>());
+#endif
+        // SETUP returns with requestWarmReboot(7); the launcher clamps that to the
+        // last app, so it stays correct in the Embody-only list too.
         GetMooncake().installApp(std::make_unique<AppSetup>());
 
         // Main loop

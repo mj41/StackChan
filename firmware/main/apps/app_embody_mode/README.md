@@ -10,7 +10,8 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
    - **Tap:** sends a `screen_tap` event with x/y.
    - **Long press:** toggles the QR code, so another viewer can pair.
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
-5. **Closing:** swiping up closes the app and warm-reboots to the launcher. Wi-Fi can't be stopped cleanly, which is the same reason AVATAR reboots.
+5. **Screensaver:** after `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S` (default 60 s, 0 = never) without touch, the screen goes blank (black). It sends `screensaver_on`, and on wake `screensaver_off`. A touch brings back the previous view (face, picture or QR). So does a command that changes the screen (emotion, say, sticker, face, a new picture) and the first pairing. The LIVE badge stays visible.
+6. **Closing:** swiping up closes the app and warm-reboots to the launcher. Wi-Fi can't be stopped cleanly, which is the same reason AVATAR reboots.
 
 ## Configuration
 
@@ -26,6 +27,11 @@ CONFIG_STACKCHAN_EMBODY_TOKEN="<the server's robot-token file>"
 
 The robot ID is `stackchan-<factory MAC, lowercase>`.
 
+Other options in the same menu:
+
+- `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S`: seconds without touch before the screen blanks. Default 60; 0 disables it.
+- `CONFIG_STACKCHAN_EMBODY_ONLY`: the launcher installs only Embody Mode and SETUP, and ignores "start AI.AGENT on boot". Default off.
+
 ## What it does
 
 | Area | Details |
@@ -34,8 +40,8 @@ The robot ID is `stackchan-<factory MAC, lowercase>`.
 | Pictures | binary `0x10` JPEG, decoded with `jpeg_dec::decode_to_lvgl` and shown over the face |
 | Camera | `StreamCaptures()`, then `image_to_jpeg` (quality 25), sent as binary `0x01` every 200 ms while on |
 | Microphone | a FreeRTOS task reads the audio codec at 24 kHz, channel 1 (as in the SETUP mic test). Sent as binary `0x02` in 50 ms messages |
-| Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume |
-| Events | IMU shake, head-touch press and swipes, screen taps |
+| Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1) |
+| Events | IMU shake, head-touch press and swipes, screen taps, screensaver on/off |
 
 ## Code
 
