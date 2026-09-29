@@ -283,3 +283,19 @@ bool Client::sendBinary(uint8_t type, const uint8_t* data, size_t len)
     msg.append((const char*)data, len);
     return _ws->Send(msg.data(), msg.size(), true);
 }
+
+void Client::standby(uint32_t delayMs)
+{
+    mclog::tagInfo(_tag, "standby for {} s", delayMs / 1000);
+    _ws.reset();
+    _backoff = 1000;
+    schedule_retry(State::Offline, "Standby", delayMs);
+}
+
+void Client::wakeNow()
+{
+    if (_state != State::Registered) {
+        _next_try  = GetHAL().millis();
+        _announced = false;
+    }
+}

@@ -95,6 +95,11 @@ public:
         return _state == State::Registered;
     }
 
+    // Standby: disconnect now and stay offline for delayMs (then reconnect as usual).
+    void standby(uint32_t delayMs);
+    // End standby early: reconnect on the next update().
+    void wakeNow();
+
 private:
     Config _config;
     std::unique_ptr<WebSocket> _ws;

@@ -84,6 +84,13 @@ private:
     uint32_t _seen_commands = 0;  // embody::Client::commandCount() already counted
     std::atomic<bool> _blank_requested{false};  // double tap, set from the LVGL task
 
+    // Standby (the "standby" command): offline, backlight off, blank screen,
+    // LEDs/camera/mic off, until _standby_until or a touch.
+    uint32_t _standby_until        = 0;  // ms; 0 = not in standby
+    uint32_t _standby_since        = 0;
+    bool _standby_disconnect       = false;  // disconnect once the "standby" event is sent
+    uint8_t _standby_brightness    = 60;
+
     bool _qr_visible = true;
     int _rendered_viewers = 0;
     std::atomic<bool> _toggle_qr_requested{false};  // set from LVGL event callbacks
@@ -126,6 +133,8 @@ private:
     void create_view();
     void render();
     void update_screensaver();
+    void start_standby(int minutes);
+    void update_standby();
     void enter_blank(bool manual);
     void leave_blank();
     void wake_screen();

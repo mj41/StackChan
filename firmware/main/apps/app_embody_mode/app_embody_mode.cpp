@@ -119,7 +119,7 @@ void AppEmbodyMode::onOpen()
         .model     = "stackchan-cores3",
         .firmware  = esp_app_get_description()->version,
         .commands  = {"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-                      "sticker", "face", "image", "camera", "mic", "screensaver"},
+                      "sticker", "face", "image", "camera", "mic", "screensaver", "standby"},
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
     });
@@ -186,13 +186,18 @@ void AppEmbodyMode::onRunning()
             _last_activity = GetHAL().millis();
         }
 
+        // Events wait while offline (e.g. during standby) and go out after reconnecting.
         std::vector<std::pair<std::string, embody::Client::Telemetry>> events;
-        {
+        if (_client->isRegistered()) {
             std::lock_guard<std::mutex> lock(_event_mutex);
             events.swap(_pending_events);
         }
         for (const auto& [name, data] : events) {
             _client->sendEvent(name, data);
+        }
+        if (_standby_disconnect) {  // the "standby" event is out; now go offline
+            _standby_disconnect = false;
+            _client->standby(_standby_until - GetHAL().millis());
         }
 
         if (!_pending_picture_jpeg.empty()) {
@@ -234,6 +239,7 @@ void AppEmbodyMode::onRunning()
 
     update_motion();
     render();
+    update_standby();
     update_screensaver();
     GetStackChan().update();
     view::update_home_indicator();
@@ -562,6 +568,8 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(_picture_obj, nullptr);
         _picture.reset();
+    } else if (command == "standby") {
+        start_standby(args["minutes"] | 5);
     } else if (command == "screensaver") {
         (args["on"] | false) ? enter_blank(true) : leave_blank();
     } else if (command == "camera") {
@@ -763,8 +771,8 @@ void AppEmbodyMode::update_motion()
 //   "screensaver off" ends it, so remote use doesn't undo it.
 void AppEmbodyMode::update_screensaver()
 {
-    if (!_panel) {
-        return;
+    if (!_panel || _standby_until) {
+        return;  // standby owns the screen
     }
     const uint32_t now        = GetHAL().millis();
     const uint32_t touch_idle = lv_display_get_inactive_time(nullptr);
@@ -830,4 +838,52 @@ void AppEmbodyMode::leave_blank()
 void AppEmbodyMode::wake_screen()
 {
     _last_activity = GetHAL().millis();
+}
+
+/* --------------------------------- Standby -------------------------------- */
+
+// Soft standby for N minutes: tell the server, then go offline with the
+// backlight off, a blank screen, and LEDs, camera and microphone off. The
+// servos already release torque when idle. A touch or the timeout ends it.
+// Runs under the LVGL lock.
+void AppEmbodyMode::start_standby(int minutes)
+{
+    minutes = std::clamp(minutes, 1, 120);
+    stop_mic();
+    _camera_on = false;
+    auto& sc   = GetStackChan();
+    sc.leftNeonLight().setColor((uint32_t)0);
+    sc.rightNeonLight().setColor((uint32_t)0);
+    enter_blank(true);
+
+    _standby_brightness = GetHAL().getBackLightBrightness();
+    GetHAL().setBackLightBrightness(0);
+    _standby_since      = GetHAL().millis();
+    _standby_until      = _standby_since + minutes * 60000u;
+    if (_standby_until == 0) {
+        _standby_until = 1;  // 0 means "not in standby"
+    }
+    queue_event("standby", {{"minutes", (float)minutes}});
+    _standby_disconnect = true;
+    mclog::tagInfo(_tag, "standby for {} min", minutes);
+}
+
+void AppEmbodyMode::update_standby()
+{
+    if (!_standby_until) {
+        return;
+    }
+    const uint32_t now = GetHAL().millis();
+    bool touched       = lv_display_get_inactive_time(nullptr) < now - _standby_since;
+    if (!touched && (int32_t)(now - _standby_until) < 0) {
+        return;
+    }
+    _standby_until = 0;
+    GetHAL().setBackLightBrightness(_standby_brightness);
+    leave_blank();
+    queue_event("standby_end", {{"touched", touched ? 1.0f : 0.0f}});
+    if (_client) {
+        _client->wakeNow();
+    }
+    mclog::tagInfo(_tag, "standby end ({})", touched ? "touch" : "timeout");
 }
