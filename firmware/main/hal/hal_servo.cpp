@@ -359,3 +359,16 @@ void Hal::servo_init()
 
     GetStackChan().attachMotion(std::move(motion));
 }
+
+bool Hal::readServoStatus(int id, ServoStatus_t& out)
+{
+    if (_scs_bus.FeedBack(id) < 0) {
+        return false;
+    }
+    out.position    = _scs_bus.ReadPos(-1);
+    out.load        = _scs_bus.ReadLoad(-1);
+    out.voltage     = _scs_bus.ReadVoltage(-1) / 10.0f;
+    out.temperature = _scs_bus.ReadTemper(-1);
+    out.moving      = _scs_bus.ReadMove(-1) > 0;
+    return true;
+}

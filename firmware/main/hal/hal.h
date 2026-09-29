@@ -22,6 +22,21 @@
  */
 enum class HeadPetGesture { None, Press, Release, SwipeForward, SwipeBackward };
 
+// Latest BMI270 sample: acceleration in m/s^2, rotation rate in degrees/s.
+struct ImuSample_t {
+    float accel[3] = {};
+    float gyro[3]  = {};
+};
+
+// One SCS servo's feedback registers.
+struct ServoStatus_t {
+    int position    = 0;  // raw 0..1000
+    int load        = 0;  // -1000..1000, per mille of the drive voltage, signed by direction
+    float voltage   = 0;  // V
+    int temperature = 0;  // degrees C
+    bool moving     = false;
+};
+
 /**
  * @brief
  *
@@ -230,6 +245,9 @@ public:
 
     /* --------------------------------- HeadPet -------------------------------- */
     uitk::Signal<HeadPetGesture> onHeadPetGesture;
+    // Current intensity of the three touch zones, 0 (none) to 3 (high), in the
+    // order a forward swipe crosses them. Updated every 50 ms; any thread.
+    std::array<uint8_t, 3> getHeadTouchZones();
 
     /* ----------------------------------- RGB ---------------------------------- */
     void setRgbColor(uint8_t index, uint8_t r, uint8_t g, uint8_t b);
@@ -238,6 +256,11 @@ public:
 
     /* ---------------------------------- Power --------------------------------- */
     void setServoPowerEnabled(bool enabled);
+
+    /* ---------------------------------- Servo --------------------------------- */
+    // Reads a servo's feedback registers (id 1 yaw, 2 pitch) in one bus round trip.
+    // The servo bus has no lock: call it only from the thread that drives the servos.
+    bool readServoStatus(int id, ServoStatus_t& out);
 
     /* -------------------------------- Websocket ------------------------------- */
     uitk::Signal<std::string_view> onWsMotionData;
@@ -255,6 +278,8 @@ public:
 
     /* ----------------------------------- IMU ---------------------------------- */
     uitk::Signal<ImuMotionEvent> onImuMotionEvent;
+    // The latest sample (10 Hz). False until the IMU has delivered one. Any thread.
+    bool getImuSample(ImuSample_t& out);
 
     /* ---------------------------------- Time ---------------------------------- */
     void syncRtcTimeToSystem();

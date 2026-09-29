@@ -20,6 +20,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <ArduinoJson.hpp>
+#include <driver/temperature_sensor.h>
 
 class LvglAllocatedImage;
 
@@ -119,6 +120,10 @@ private:
     std::vector<PendingEvent> _pending_events;
     size_t _imu_connection = 0;
     size_t _head_connection = 0;
+    uint32_t _head_press_ms = 0;  // head-touch task only
+
+    // ESP32-S3 internal temperature sensor, for the chip_temp_c measurement.
+    temperature_sensor_handle_t _tsens = nullptr;
 
     // Camera: frames are captured and JPEG-encoded in the app loop while on.
     bool _camera_on           = false;
@@ -181,6 +186,7 @@ private:
     void wake_screen();
     uint32_t touch_idle_ms();
     void run_command(const std::string& command, const std::string& args);
+    void add_sensor_telemetry(embody::Client::Telemetry& t);
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();

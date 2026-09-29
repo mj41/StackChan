@@ -51,8 +51,8 @@ Other options in the same menu:
 | Speaker | binary `0x03` PCM is resampled to the codec's 24 kHz and queued (max ~3 s). A FreeRTOS task writes 20 ms chunks with `OutputData` and switches output off after 0.5 s of silence. The mouth moves while it plays, and the audio counts as use for the screensaver |
 | LEDs | `leds` args: `left`/`right` fade a whole side (NeonLight); `pixels` sets up to 12 single LEDs (left 0–5, then right 6–11; `null` skips one); `effect` `rainbow`, `breathe`, `chase`, `blink` or `off`, with `color`, `speed` (0.2–5) and `seconds` (0 = until the next `leds`). Effects are drawn at 25 fps in the app loop, both sides mirrored; a timed effect restores the side colours when it ends |
 | NFC | `hal/drivers/ST25R3916`: a minimal ISO14443A reader ported from M5Stack's UiFlow2 driver (MIT). A FreeRTOS task (priority 1, core 1) polls twice a second with the RF field on only for the ~30 ms of each poll; the chip's IRQ pin isn't wired on StackChan. It reads 4- and 7-byte UIDs and, for Type 2 tags (NTAG, Ultralight), the first NDEF record (URI or text). It stops during standby. `nfc {"on"}` switches polling (on by default) |
-| Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1) |
-| Events | IMU shake, head-touch press and swipes, screen taps, screensaver on/off, standby, `nfc_tag {uid, type, atqa, sak, text}` and `nfc_removed {uid}` (after two missed polls) |
+| Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1/2); sensors: `imu_ax_g`/`imu_ay_g`/`imu_az_g` and `imu_gyro_dps` (HAL snapshot, 10 Hz), `yaw_`/`pitch_load_pct` and `_temp_c` plus `servo_voltage_v` (one servo feedback read per servo, in the app loop that owns the servo bus), `chip_temp_c` (ESP32-S3 sensor) |
+| Events | IMU shake, head-touch press (zones `z0`–`z2`, 0–3) / release (`ms`) and swipes, screen taps, screensaver on/off, standby, `nfc_tag {uid, type, atqa, sak, text}` and `nfc_removed {uid}` (after two missed polls) |
 
 ## Code
 

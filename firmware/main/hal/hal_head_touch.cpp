@@ -7,6 +7,7 @@
 #include "drivers/Si12T/Si12T.h"
 #include "board/hal_bridge.h"
 #include <mooncake_log.h>
+#include <atomic>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 
@@ -115,6 +116,9 @@ private:
     int16_t initial_position;
 };
 
+// Zone intensities packed as z0 | z1 << 8 | z2 << 16, for getHeadTouchZones().
+static std::atomic<uint32_t> _zones{0};
+
 static void _head_touch_update_task(void* param)
 {
     mclog::tagInfo(_tag, "start update task");
@@ -132,6 +136,7 @@ static void _head_touch_update_task(void* param)
         // Read data
         si12t_read_touch_result(si12t, &touch_result);
         si12t_parse_touch_result_to(touch_result, data.intensity);
+        _zones = data.intensity[0] | (data.intensity[1] << 8) | (data.intensity[2] << 16);
         data.timestamp = xTaskGetTickCount();
 
         // Update and fire event
@@ -161,4 +166,10 @@ void Hal::head_touch_init()
     // xTaskCreateWithCaps(_head_touch_update_task, "headtouch", 1024 * 6, si12t, 2, NULL, MALLOC_CAP_SPIRAM);
     xTaskCreatePinnedToCoreWithCaps(_head_touch_update_task, "headtouch", 1024 * 6, si12t, 2, NULL, 1,
                                     MALLOC_CAP_SPIRAM);
+}
+
+std::array<uint8_t, 3> Hal::getHeadTouchZones()
+{
+    const uint32_t z = _zones;
+    return {(uint8_t)(z & 0xFF), (uint8_t)((z >> 8) & 0xFF), (uint8_t)((z >> 16) & 0xFF)};
 }

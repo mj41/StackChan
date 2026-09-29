@@ -9,10 +9,14 @@
 #include "utils/motion_detector/motion_detector.h"
 #include <mooncake_log.h>
 #include <memory>
+#include <mutex>
 
 static const std::string_view _tag = "HAL-IMU";
 
 static std::unique_ptr<BMI270> _bmi270;
+static std::mutex _sample_mutex;
+static ImuSample_t _sample;
+static bool _has_sample = false;
 
 static void _imu_task(void* param)
 {
@@ -22,6 +26,11 @@ static void _imu_task(void* param)
     while (1) {
         if (_bmi270 && _bmi270->update()) {
             auto& data = _bmi270->getData();
+            {
+                std::lock_guard<std::mutex> lock(_sample_mutex);
+                _sample     = {{data.accel_x, data.accel_y, data.accel_z}, {data.gyro_x, data.gyro_y, data.gyro_z}};
+                _has_sample = true;
+            }
             // mclog::debug("IMU Accel: {:.2f}\t{:.2f}\t{:.2f}", data.accel_x, data.accel_y, data.accel_z);
 
             motion_detector->update(data.accel_x, data.accel_y, data.accel_z);
@@ -55,4 +64,11 @@ void Hal::imu_init()
 
     // xTaskCreateWithCaps(_imu_task, "imu", 4096, NULL, 2, NULL, MALLOC_CAP_SPIRAM);
     xTaskCreatePinnedToCoreWithCaps(_imu_task, "imu", 4096, NULL, 2, NULL, 1, MALLOC_CAP_SPIRAM);
+}
+
+bool Hal::getImuSample(ImuSample_t& out)
+{
+    std::lock_guard<std::mutex> lock(_sample_mutex);
+    out = _sample;
+    return _has_sample;
 }

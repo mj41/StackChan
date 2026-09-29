@@ -136,7 +136,9 @@ void AppEmbodyMode::onOpen()
         .firmware  = esp_app_get_description()->version,
         .commands  = commands,
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
-                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
+                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
+                         "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
+                         "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -150,7 +152,7 @@ void AppEmbodyMode::onOpen()
     };
     _client->collectTelemetry = [this]() {
         auto& motion = GetStackChan().motion();
-        return embody::Client::Telemetry{
+        embody::Client::Telemetry t{
             {"battery_pct", (float)GetHAL().getBatteryLevel()},
             {"charging", GetHAL().isBatteryCharging() ? 1.0f : 0.0f},
             {"head_yaw_deg", motion.getCurrentYawAngle() / 10.0f},
@@ -162,6 +164,8 @@ void AppEmbodyMode::onOpen()
             {"volume_pct", (float)GetHAL().getSpeakerVolume()},
             {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
         };
+        add_sensor_telemetry(t);
+        return t;
     };
 
     _imu_connection = GetHAL().onImuMotionEvent.connect([this](ImuMotionEvent event) {
@@ -174,8 +178,15 @@ void AppEmbodyMode::onOpen()
     _head_connection = GetHAL().onHeadPetGesture.connect([this](HeadPetGesture gesture) {
         _last_physical = GetHAL().millis();  // wakes the screen like a touch
         switch (gesture) {
-            case HeadPetGesture::Press:
-                queue_event("head_press");
+            case HeadPetGesture::Press: {
+                // Zone intensities 0-3, in the order a forward swipe crosses them
+                auto z         = GetHAL().getHeadTouchZones();
+                _head_press_ms = GetHAL().millis();
+                queue_event("head_press", {{"z0", (float)z[0]}, {"z1", (float)z[1]}, {"z2", (float)z[2]}});
+                break;
+            }
+            case HeadPetGesture::Release:
+                queue_event("head_release", {{"ms", (float)(GetHAL().millis() - _head_press_ms)}});
                 break;
             case HeadPetGesture::SwipeForward:
                 queue_event("head_swipe_forward");
@@ -191,6 +202,14 @@ void AppEmbodyMode::onOpen()
     if (_nfc) {
         _nfc_enabled = true;
         start_nfc();
+    }
+
+    temperature_sensor_config_t tsens_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
+    if (temperature_sensor_install(&tsens_config, &_tsens) != ESP_OK) {
+        _tsens = nullptr;
+    } else if (temperature_sensor_enable(_tsens) != ESP_OK) {
+        temperature_sensor_uninstall(_tsens);
+        _tsens = nullptr;
     }
 }
 
@@ -288,6 +307,11 @@ void AppEmbodyMode::onClose()
     _nfc.reset();
     _nfc_enabled = false;
     stop_led_effect(false);
+    if (_tsens) {
+        temperature_sensor_disable(_tsens);
+        temperature_sensor_uninstall(_tsens);
+        _tsens = nullptr;
+    }
     _camera_on = false;
     if (_client) {
         GetHAL().onImuMotionEvent.disconnect(_imu_connection);
@@ -507,6 +531,38 @@ void AppEmbodyMode::render()
         _detail->setText("Long press to show the face");
     } else {
         _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
+    }
+}
+
+// Sensor values for the 2 s telemetry. Runs in the app loop, which also drives
+// the servos, so reading the servo bus here is safe.
+void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
+{
+    auto round_to = [](float v, float step) { return std::round(v / step) * step; };
+
+    ImuSample_t imu;
+    if (GetHAL().getImuSample(imu)) {
+        constexpr float g = 9.80665f;  // m/s^2 per g
+        t.emplace_back("imu_ax_g", round_to(imu.accel[0] / g, 0.01f));
+        t.emplace_back("imu_ay_g", round_to(imu.accel[1] / g, 0.01f));
+        t.emplace_back("imu_az_g", round_to(imu.accel[2] / g, 0.01f));
+        t.emplace_back("imu_gyro_dps", round_to(std::hypot(imu.gyro[0], imu.gyro[1], imu.gyro[2]), 0.1f));
+    }
+
+    ServoStatus_t servo;
+    if (GetHAL().readServoStatus(1, servo)) {
+        t.emplace_back("yaw_load_pct", servo.load / 10.0f);
+        t.emplace_back("yaw_temp_c", (float)servo.temperature);
+        t.emplace_back("servo_voltage_v", servo.voltage);
+    }
+    if (GetHAL().readServoStatus(2, servo)) {
+        t.emplace_back("pitch_load_pct", servo.load / 10.0f);
+        t.emplace_back("pitch_temp_c", (float)servo.temperature);
+    }
+
+    float celsius = 0;
+    if (_tsens && temperature_sensor_get_celsius(_tsens, &celsius) == ESP_OK) {
+        t.emplace_back("chip_temp_c", round_to(celsius, 0.1f));
     }
 }
 
