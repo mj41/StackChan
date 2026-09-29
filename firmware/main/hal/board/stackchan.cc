@@ -91,6 +91,19 @@ public:
         XPOWERS_AXP2101_CHG_CUR_1000MA,
     } xpowers_axp2101_chg_curr_t;
 
+    // Red charge LED (CHGLED, register 0x69): 0 off, 1 blink 1 Hz, 2 blink 4 Hz,
+    // 3 on (all under manual control, bits 2:1 = 10), 4 = the charger drives it (type A).
+    // Boot leaves it on (0b00110101).
+    void SetChargeLed(int mode)
+    {
+        const uint8_t v = ReadReg(0x69);
+        if (mode >= 0 && mode <= 3) {
+            WriteReg(0x69, (v & 0xC8) | 0x05 | (mode << 4));
+        } else {
+            WriteReg(0x69, (v & 0xF9) | 0x01);
+        }
+    }
+
     // Power Init
     Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr)
     {
@@ -653,9 +666,22 @@ public:
     {
         return i2c_bus_;
     }
+
+    void SetChargeLed(int mode)
+    {
+        if (pmic_) {
+            pmic_->SetChargeLed(mode);
+        }
+    }
 };
 
 DECLARE_BOARD(M5StackCoreS3Board);
+
+void hal_bridge::board_set_charge_led(int mode)
+{
+    auto& board = (M5StackCoreS3Board&)Board::GetInstance();
+    board.SetChargeLed(mode);
+}
 
 i2c_master_bus_handle_t hal_bridge::board_get_i2c_bus()
 {

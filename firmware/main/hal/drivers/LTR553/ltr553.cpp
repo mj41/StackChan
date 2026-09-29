@@ -122,3 +122,8 @@ bool LTR553::readProximity(uint16_t& value)
     value = d[0] | ((d[1] & 0x07) << 8);
     return true;
 }
+
+bool LTR553::setProximityEnabled(bool on)
+{
+    return _dev && wr(REG_PS_CONTR, on ? 0x02 : 0x00);
+}

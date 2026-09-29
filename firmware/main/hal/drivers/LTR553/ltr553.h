@@ -25,6 +25,8 @@ public:
     bool readLux(float& lux);
     // Proximity, 0..2047: higher is closer. Relative only; depends on the target.
     bool readProximity(uint16_t& value);
+    // Proximity on/off. Off puts it in standby: its IR LED stops pulsing. Light keeps working.
+    bool setProximityEnabled(bool on);
 
 private:
     i2c_master_dev_handle_t _dev = nullptr;

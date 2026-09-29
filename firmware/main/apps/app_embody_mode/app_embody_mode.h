@@ -7,6 +7,7 @@
 #include "embody_client.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
+#include <hal/drivers/IrRemote/ir_remote.h>
 #include <mooncake.h>
 #include <lvgl.h>
 #include <atomic>
@@ -130,10 +131,14 @@ private:
     bool _auto_brightness     = false;
     float _lux                = -1;  // smoothed; < 0 until the first reading
     uint16_t _proximity       = 0;
+    bool _proximity_on        = true;  // the "proximity" command; off = the sensor's IR LED stops
     float _prox_base          = -1;  // slowly adapting "nobody near" level
     bool _near                = false;
     uint32_t _last_light_read = 0;
     uint32_t _last_prox_read  = 0;
+
+    // Infrared (LED on G5, receiver on G10): "ir_send" and "ir_received" events.
+    std::unique_ptr<IrRemote> _ir;
 
     // ESP32-S3 internal temperature sensor, for the chip_temp_c measurement.
     temperature_sensor_handle_t _tsens = nullptr;
@@ -201,6 +206,7 @@ private:
     void run_command(const std::string& command, const std::string& args);
     void add_sensor_telemetry(embody::Client::Telemetry& t);
     void update_light();
+    void update_ir();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();

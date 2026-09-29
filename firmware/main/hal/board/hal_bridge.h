@@ -54,6 +54,8 @@ XiaozhiConfig_t get_xiaozhi_config();
 void set_xiaozhi_config(const XiaozhiConfig_t& config);
 
 i2c_master_bus_handle_t board_get_i2c_bus();
+// Red power/charge LED: 0 off, 1 blink 1 Hz, 2 blink 4 Hz, 3 on, 4 driven by the charger.
+void board_set_charge_led(int mode);
 StackChanCamera* board_get_camera();
 int board_get_battery_level();
 bool board_is_battery_charging();

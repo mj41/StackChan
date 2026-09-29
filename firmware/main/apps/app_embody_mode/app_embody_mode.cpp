@@ -129,12 +129,26 @@ void AppEmbodyMode::onOpen()
     }
     _auto_brightness = _light != nullptr;
 
+    // Infrared transmitter and receiver in the body.
+    _ir = std::make_unique<IrRemote>();
+    if (!_ir->begin(GPIO_NUM_5, GPIO_NUM_10)) {
+        mclog::tagWarn(_tag, "ir: RMT setup failed");
+        _ir.reset();
+    }
+
     std::vector<std::string> commands = {"ping",    "nod",  "shake", "look",   "home", "emotion",     "say",
                                          "leds",    "brightness", "volume", "sticker", "face", "image",
                                          "camera",  "mic",  "screensaver", "standby", "speaker"};
     if (_nfc) {
         commands.push_back("nfc");
     }
+    if (_ir) {
+        commands.push_back("ir_send");
+    }
+    if (_light) {
+        commands.push_back("proximity");
+    }
+    commands.push_back("power_led");
 
     _client = std::make_unique<embody::Client>(embody::Client::Config{
         .serverUrl = server_url,
@@ -147,7 +161,7 @@ void AppEmbodyMode::onOpen()
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
                          "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
                          "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
-                         "proximity", "auto_brightness"},
+                         "proximity", "proximity_on", "auto_brightness"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -271,6 +285,7 @@ void AppEmbodyMode::onRunning()
 
     update_leds();
     update_light();
+    update_ir();
 
     LvglLockGuard lock;
     for (const auto& [command, args] : _pending_commands) {
@@ -318,6 +333,7 @@ void AppEmbodyMode::onClose()
     _nfc_enabled = false;
     stop_led_effect(false);
     _light.reset();  // standby: the IR LED stops
+    _ir.reset();
     if (_tsens) {
         temperature_sensor_disable(_tsens);
         temperature_sensor_uninstall(_tsens);
@@ -575,7 +591,10 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         if (_lux >= 0) {
             t.emplace_back("light_lux", round_to(_lux, _lux < 10 ? 0.1f : 1.0f));
         }
-        t.emplace_back("proximity", (float)_proximity);
+        if (_proximity_on) {
+            t.emplace_back("proximity", (float)_proximity);
+        }
+        t.emplace_back("proximity_on", _proximity_on ? 1.0f : 0.0f);
         t.emplace_back("auto_brightness", _auto_brightness ? 1.0f : 0.0f);
     }
 
@@ -691,6 +710,48 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         mclog::tagInfo(_tag, "camera {}", _camera_on ? "on" : "off");
     } else if (command == "mic") {
         (args["on"] | false) ? start_mic() : stop_mic();
+    } else if (command == "ir_send") {
+        // {"raw": "9000,4500,562,..."} marks/spaces in us (+ "carrier_hz"), or NEC {"address", "command"};
+        // "loopback": true lets the receiver hear the robot's own signal (self-test).
+        const std::string raw = args["raw"] | "";
+        const bool loopback   = args["loopback"] | false;
+        bool ok               = false;
+        // The proximity sensor's IR LED pulses ~10x/s next to ours: pause it while sending.
+        const bool pause_proximity = _light && _proximity_on;
+        if (pause_proximity) {
+            _light->setProximityEnabled(false);
+        }
+        if (_ir && !raw.empty()) {
+            ok = _ir->send(IrRemote::timingsFromString(raw), args["carrier_hz"] | 38000, loopback);
+        } else if (_ir) {
+            ok = _ir->sendNec(args["address"] | 0, args["command"] | 0, loopback);
+        }
+        if (pause_proximity) {
+            _light->setProximityEnabled(true);
+        }
+        mclog::tagInfo(_tag, "ir: sent {} ({})", raw.empty() ? "NEC" : "raw", ok ? "ok" : "failed");
+    } else if (command == "proximity") {
+        // Off: the LTR-553's IR LED (next to the camera) stops pulsing; light and auto-brightness keep working.
+        _proximity_on = args["on"] | true;
+        if (_light) {
+            _light->setProximityEnabled(_proximity_on);
+        }
+        if (!_proximity_on && _near) {
+            _near = false;
+            queue_event("proximity_far", {{"value", 0.0f}});
+        }
+        _prox_base = -1;  // re-learn the baseline when it comes back
+        mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
+    } else if (command == "power_led") {
+        // Red power/charge LED on the PMIC
+        static constexpr std::pair<const char*, int> modes[] = {
+            {"off", 0}, {"blink", 1}, {"fast", 2}, {"on", 3}, {"charging", 4}};
+        const std::string mode = args["mode"] | "";
+        for (const auto& [name, value] : modes) {
+            if (mode == name) {
+                hal_bridge::board_set_charge_led(value);
+            }
+        }
     } else if (command == "nfc") {
         _nfc_enabled = _nfc && (args["on"] | true);
         _nfc_enabled ? start_nfc() : stop_nfc();
@@ -1149,7 +1210,7 @@ void AppEmbodyMode::update_light()
     const uint32_t now = GetHAL().millis();
 
     uint16_t ps = 0;
-    if (now - _last_prox_read >= _prox_interval_ms && _light->readProximity(ps)) {
+    if (_proximity_on && now - _last_prox_read >= _prox_interval_ms && _light->readProximity(ps)) {
         _last_prox_read = now;
         _proximity      = ps;
         if (_prox_base < 0) {
@@ -1184,6 +1245,28 @@ void AppEmbodyMode::update_light()
                 GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
             }
         }
+    }
+}
+
+/* ---------------------------------- IR ------------------------------------ */
+
+// Received IR frames become "ir_received" events: NEC address/command when it
+// decodes, and always the raw timings, so the browser can replay any remote.
+// NEC repeat codes (a held button) and very short bursts (noise) are skipped.
+void AppEmbodyMode::update_ir()
+{
+    IrRemote::Frame frame;
+    while (_ir && _ir->receive(frame)) {
+        if (frame.repeat || (!frame.nec && frame.timings.size() < 8)) {
+            continue;
+        }
+        embody::Client::Telemetry data;
+        if (frame.nec) {
+            data = {{"address", (float)frame.address}, {"command", (float)frame.command}};
+        }
+        queue_event("ir_received", std::move(data),
+                    {{"protocol", frame.nec ? "nec" : "raw"}, {"raw", IrRemote::timingsToString(frame.timings)}});
+        mclog::tagInfo(_tag, "ir: received {} ({} timings)", frame.nec ? "NEC" : "raw", frame.timings.size());
     }
 }
 
