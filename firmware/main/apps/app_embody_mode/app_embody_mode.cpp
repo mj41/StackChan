@@ -23,7 +23,7 @@ using namespace mooncake;
 using namespace smooth_ui_toolkit::lvgl_cpp;
 
 // Launcher index of this app (see requestWarmReboot in the other apps).
-static constexpr int _launcher_index = 1;
+static constexpr int _launcher_index = 0;
 
 static constexpr uint32_t _color_theme = 0x7D8CFF;
 static constexpr uint32_t _color_text  = 0x1E2355;

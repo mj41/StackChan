@@ -1,8 +1,50 @@
 diff --git a/main/application.cc b/main/application.cc
-index d69d43d..3b6f07e 100644
+index d69d43d..642888b 100644
 --- a/main/application.cc
 +++ b/main/application.cc
-@@ -610,33 +610,36 @@ void Application::InitializeProtocol() {
+@@ -328,7 +328,12 @@ void Application::ActivationTask() {
+     CheckAssetsVersion();
+ 
+     // Check for new firmware version
++#ifdef CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK
+     CheckNewVersion();
++#else
++    // StackChan: no contact with the OTA server; use the protocol settings stored by the last check.
++    ESP_LOGW(TAG, "OTA server check disabled (CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK), using stored protocol settings");
++#endif
+ 
+     // Initialize the protocol
+     InitializeProtocol();
+@@ -357,6 +362,15 @@ void Application::CheckAssetsVersion() {
+     // Check if there is a new assets need to be downloaded
+     std::string download_url = settings.GetString("download_url");
+ 
++#ifndef CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK
++    // StackChan: never download assets from a URL left by an earlier OTA server check.
++    if (!download_url.empty()) {
++        ESP_LOGW(TAG, "Ignoring stored assets download URL (OTA server check disabled)");
++        settings.EraseKey("download_url");
++        download_url.clear();
++    }
++#endif
++
+     if (!download_url.empty()) {
+         settings.EraseKey("download_url");
+ 
+@@ -433,10 +447,8 @@ void Application::CheckNewVersion() {
+         retry_delay = 10; // Reset retry delay
+ 
+         if (ota_->HasNewVersion()) {
+-            if (UpgradeFirmware(ota_->GetFirmwareUrl(), ota_->GetFirmwareVersion())) {
+-                return; // This line will never be reached after reboot
+-            }
+-            // If upgrade failed, continue to normal operation
++            // StackChan: never install firmware offered by the OTA server; firmware comes only from its owner.
++            ESP_LOGW(TAG, "OTA server offers firmware %s, not installing", ota_->GetFirmwareVersion().c_str());
+         }
+ 
+         // No new version, mark the current version as valid
+@@ -610,33 +622,36 @@ void Application::InitializeProtocol() {
  }
  
  void Application::ShowActivationCode(const std::string& code, const std::string& message) {
@@ -271,3 +313,35 @@ index 7bc917b..874b137 100644
  };
  
  #endif // I2C_DEVICE_H
+diff --git a/main/mcp_server.cc b/main/mcp_server.cc
+index 7cd7ba0..b720a23 100644
+--- a/main/mcp_server.cc
++++ b/main/mcp_server.cc
+@@ -148,25 +148,8 @@ void McpServer::AddUserOnlyTools() {
+             return true;
+         });
+ 
+-    // Firmware upgrade
+-    AddUserOnlyTool("self.upgrade_firmware", "Upgrade firmware from a specific URL. This will download and install the firmware, then reboot the device.",
+-        PropertyList({
+-            Property("url", kPropertyTypeString, "The URL of the firmware binary file to download and install")
+-        }),
+-        [this](const PropertyList& properties) -> ReturnValue {
+-            auto url = properties["url"].value<std::string>();
+-            ESP_LOGI(TAG, "User requested firmware upgrade from URL: %s", url.c_str());
+-            
+-            auto& app = Application::GetInstance();
+-            app.Schedule([url, &app]() {
+-                bool success = app.UpgradeFirmware(url);
+-                if (!success) {
+-                    ESP_LOGE(TAG, "Firmware upgrade failed");
+-                }
+-            });
+-            
+-            return true;
+-        });
++    // StackChan: no "self.upgrade_firmware" tool. It let the server install firmware
++    // from any URL; firmware comes only from its owner (stackchan-mj/docs/design.md).
+ 
+     // Display control
+ #ifdef HAVE_LVGL

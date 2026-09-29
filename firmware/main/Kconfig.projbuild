@@ -1023,3 +1023,18 @@ config STACKCHAN_EMBODY_TOKEN
         file. Keep it in sdkconfig.defaults.local, which is gitignored.
 
 endmenu
+
+menu "StackChan firmware updates"
+
+config STACKCHAN_XIAOZHI_OTA_CHECK
+    bool "Check the xiaozhi OTA server when AI.AGENT starts"
+    default n
+    help
+        When enabled, AI.AGENT contacts CONFIG_OTA_URL (api.tenclass.net by
+        default) on start for activation, protocol settings and assets.
+        When disabled, AI.AGENT uses the protocol settings stored by its last
+        successful check and never downloads assets from that server.
+        Firmware offered by the OTA server is never installed either way:
+        firmware comes only from its owner (see stackchan-mj/docs/design.md).
+
+endmenu
