@@ -197,6 +197,7 @@ void Client::handle_frame(const Inbound& in)
         _status_text = _viewers == 1 ? "Paired with 1 browser" : fmt::format("Paired with {} browsers", _viewers);
         _revision++;
     } else if (kind == "RobotCommand") {
+        _command_count++;
         std::string command = body["command"] | "";
         if (command == "ping") {
             // Answer right here: queue_ms is how long the ping waited for the app loop.

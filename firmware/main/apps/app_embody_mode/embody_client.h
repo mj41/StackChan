@@ -70,6 +70,11 @@ public:
     {
         return _revision;
     }
+    // Increments for every RobotCommand received, including ping (counts as use).
+    uint32_t commandCount() const
+    {
+        return _command_count;
+    }
 
     // args is the command's JSON "args" object (or "{}"). "ping" is answered here.
     std::function<void(const std::string& command, const std::string& args)> onCommand;
@@ -108,6 +113,7 @@ private:
     std::string _pair_code;
     int _viewers        = 0;
     uint32_t _revision  = 0;
+    uint32_t _command_count = 0;
     bool _announced     = false;  // "Connecting…" shown before the blocking connect
     uint32_t _backoff   = 1000;
     uint32_t _next_try  = 0;

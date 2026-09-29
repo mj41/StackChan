@@ -9,8 +9,12 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
    - **Long press:** toggles the QR code, so another viewer can pair.
+   - **Double tap:** blanks the screen (manual screensaver).
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
-5. **Screensaver:** after `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S` (default 60 s, 0 = never) without touch, the screen goes blank (black). It sends `screensaver_on`, and on wake `screensaver_off`. A touch brings back the previous view (face, picture or QR). So does a command that changes the screen (emotion, say, sticker, face, a new picture) and the first pairing. The LIVE badge stays visible.
+5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. There are two kinds:
+   - **Auto:** after `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S` (default 60 s, 0 = never) without touch, command, picture or live media. Every command, even `ping`, counts as use, so a remotely used robot never blanks by itself. Touch or a command wakes it.
+   - **Manual:** a double tap or the `screensaver {"on": true}` command. It stays blank until a touch or `screensaver {"on": false}`.
+   - **Reporting:** events `screensaver_on {manual}` and `screensaver_off`, and telemetry `screensaver` (0 off, 1 auto, 2 manual).
 6. **Closing:** swiping up closes the app and warm-reboots to the launcher. Wi-Fi can't be stopped cleanly, which is the same reason AVATAR reboots.
 
 ## Configuration
@@ -36,7 +40,7 @@ Other options in the same menu:
 
 | Area | Details |
 |---|---|
-| Commands | `ping` (answered in `embody_client` with the queue time), `nod`, `shake`, `look`, `home`, `emotion`, `say`, `sticker`, `face`, `leds`, `brightness`, `volume`, `camera`, `mic` |
+| Commands | `ping` (answered in `embody_client` with the queue time), `nod`, `shake`, `look`, `home`, `emotion`, `say`, `sticker`, `face`, `leds`, `brightness`, `volume`, `screensaver`, `camera`, `mic`. Pitch is clamped to 5–85° (M5Stack safe range) |
 | Pictures | binary `0x10` JPEG, decoded with `jpeg_dec::decode_to_lvgl` and shown over the face |
 | Camera | `StreamCaptures()`, then `image_to_jpeg` (quality 25), sent as binary `0x01` every 200 ms while on |
 | Microphone | a FreeRTOS task reads the audio codec at 24 kHz, channel 1 (as in the SETUP mic test). Sent as binary `0x02` in 50 ms messages |

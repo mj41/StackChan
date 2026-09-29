@@ -44,9 +44,10 @@ static constexpr uint32_t _color_theme = 0x7D8CFF;
 static constexpr uint32_t _color_text  = 0x1E2355;
 static constexpr uint32_t _color_muted = 0x5A618E;
 
-// Servo limits in 0.1 degree (hal_servo.cpp)
+// Servo limits in 0.1 degree. Pitch stays within 5..85 degrees: M5Stack warns that
+// extreme Y angles can stall the servo and damage it (HAL allows 3..87).
 static constexpr int _yaw_min = -1280, _yaw_max = 1280;
-static constexpr int _pitch_min = 30, _pitch_max = 870;
+static constexpr int _pitch_min = 50, _pitch_max = 850;
 static constexpr int _motion_speed = 600;
 
 static constexpr AppEmbodyMode::GestureStep _nod[]   = {{'p', -120}, {'p', 100}, {'p', -120}, {'p', 0}};
@@ -118,7 +119,7 @@ void AppEmbodyMode::onOpen()
         .model     = "stackchan-cores3",
         .firmware  = esp_app_get_description()->version,
         .commands  = {"ping", "nod", "shake", "look", "home", "emotion", "say", "leds", "brightness", "volume",
-                      "sticker", "face", "image", "camera", "mic"},
+                      "sticker", "face", "image", "camera", "mic", "screensaver"},
         .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver"},
     });
@@ -142,7 +143,7 @@ void AppEmbodyMode::onOpen()
             {"uptime_s", (float)(esp_timer_get_time() / 1000000)},
             {"brightness_pct", (float)GetHAL().getBackLightBrightness()},
             {"volume_pct", (float)GetHAL().getSpeakerVolume()},
-            {"screensaver", _blank_screen ? 1.0f : 0.0f},
+            {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
         };
     };
 
@@ -175,6 +176,15 @@ void AppEmbodyMode::onRunning()
     // Network I/O, JPEG work and camera capture happen outside the LVGL lock.
     if (_client) {
         _client->update();
+
+        // Using the robot remotely keeps the screensaver away: commands (even ping) and live media.
+        if (_client->commandCount() != _seen_commands) {
+            _seen_commands  = _client->commandCount();
+            _last_activity = GetHAL().millis();
+        }
+        if (_camera_on || _mic_running) {
+            _last_activity = GetHAL().millis();
+        }
 
         std::vector<std::pair<std::string, embody::Client::Telemetry>> events;
         {
@@ -293,6 +303,8 @@ void AppEmbodyMode::on_screen_event(lv_event_t* e)
     auto code  = lv_event_get_code(e);
     if (code == LV_EVENT_LONG_PRESSED) {
         self->_toggle_qr_requested = true;
+    } else if (code == LV_EVENT_DOUBLE_CLICKED) {
+        self->_blank_requested = true;
     } else if (code == LV_EVENT_SHORT_CLICKED) {
         lv_point_t p{};
         if (auto* indev = lv_indev_active()) {
@@ -308,6 +320,7 @@ void AppEmbodyMode::create_view()
         lv_obj_add_flag(obj, LV_OBJ_FLAG_CLICKABLE);
         lv_obj_add_event_cb(obj, on_screen_event, LV_EVENT_SHORT_CLICKED, this);
         lv_obj_add_event_cb(obj, on_screen_event, LV_EVENT_LONG_PRESSED, this);
+        lv_obj_add_event_cb(obj, on_screen_event, LV_EVENT_DOUBLE_CLICKED, this);
     };
 
     // Face at the bottom, then a picture layer, then the QR panel on top.
@@ -484,9 +497,6 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         _last_command      = command;
         _rendered_revision = UINT32_MAX;  // refresh "Last: ..."
     }
-    if (command == "emotion" || command == "say" || command == "sticker" || command == "face") {
-        wake_screen();  // the change should be visible, not hidden behind the screensaver
-    }
 
     auto& sc     = GetStackChan();
     auto& motion = sc.motion();
@@ -552,6 +562,8 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(_picture_obj, nullptr);
         _picture.reset();
+    } else if (command == "screensaver") {
+        (args["on"] | false) ? enter_blank(true) : leave_blank();
     } else if (command == "camera") {
         _camera_on = args["on"] | false;
         // StackChanCamera logs a warning for every captured frame; keep the log readable.
@@ -744,39 +756,78 @@ void AppEmbodyMode::update_motion()
 
 /* ------------------------------- Screensaver ------------------------------- */
 
-// After CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S without touch, load a blank
-// (black) screen; any touch, or wake_screen(), loads the Embody screen back.
-// The top layer (LIVE badge) stays visible. Runs under the LVGL lock.
+// Blank screen, two kinds (runs under the LVGL lock):
+// - auto: after CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S without touch, command or
+//   live media; any of those ends it.
+// - manual: a double tap or the "screensaver" command; only a touch or
+//   "screensaver off" ends it, so remote use doesn't undo it.
 void AppEmbodyMode::update_screensaver()
 {
-#if CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S > 0
     if (!_panel) {
         return;
     }
-    const uint32_t timeout_ms = CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S * 1000u;
-    if (lv_display_get_inactive_time(nullptr) >= timeout_ms) {
-        if (!_blank_screen) {
-            _prev_screen  = lv_screen_active();
-            _blank_screen = lv_obj_create(nullptr);
-            lv_obj_set_style_bg_color(_blank_screen, lv_color_hex(0x000000), 0);
-            lv_obj_set_style_bg_opa(_blank_screen, LV_OPA_COVER, 0);
-            lv_obj_remove_flag(_blank_screen, LV_OBJ_FLAG_SCROLLABLE);
-            lv_screen_load(_blank_screen);
-            queue_event("screensaver_on");
-            mclog::tagInfo(_tag, "screensaver on");
+    const uint32_t now        = GetHAL().millis();
+    const uint32_t touch_idle = lv_display_get_inactive_time(nullptr);
+    const uint32_t use_idle   = std::min(touch_idle, now - _last_activity);
+
+    if (_blank_requested.exchange(false)) {
+        if (_blank_screen) {
+            _blank_manual = true;
+        } else {
+            enter_blank(true);
         }
-    } else if (_blank_screen) {
-        lv_screen_load(_prev_screen);
-        lv_obj_delete(_blank_screen);
-        _blank_screen = nullptr;
-        queue_event("screensaver_off");
-        mclog::tagInfo(_tag, "screensaver off");
+        return;
+    }
+
+    if (_blank_screen) {
+        bool touched = touch_idle < now - _blank_since;  // a touch after the screen went blank
+        if (touched || (!_blank_manual && use_idle < now - _blank_since)) {
+            leave_blank();
+        }
+        return;
+    }
+
+#if CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S > 0
+    if (use_idle >= CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S * 1000u) {
+        enter_blank(false);
     }
 #endif
 }
 
-// Counts as user activity, so the screensaver closes on the next update.
+void AppEmbodyMode::enter_blank(bool manual)
+{
+    if (_blank_screen) {
+        _blank_manual = _blank_manual || manual;
+        return;
+    }
+    _prev_screen  = lv_screen_active();
+    _blank_screen = lv_obj_create(nullptr);
+    lv_obj_set_style_bg_color(_blank_screen, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(_blank_screen, LV_OPA_COVER, 0);
+    lv_obj_remove_flag(_blank_screen, LV_OBJ_FLAG_SCROLLABLE);
+    lv_screen_load(_blank_screen);
+    _blank_manual = manual;
+    _blank_since  = GetHAL().millis();
+    queue_event("screensaver_on", {{"manual", manual ? 1.0f : 0.0f}});
+    mclog::tagInfo(_tag, "screensaver on ({})", manual ? "manual" : "auto");
+}
+
+void AppEmbodyMode::leave_blank()
+{
+    if (!_blank_screen) {
+        return;
+    }
+    lv_screen_load(_prev_screen);
+    lv_obj_delete(_blank_screen);
+    _blank_screen  = nullptr;
+    _blank_manual  = false;
+    _last_activity = GetHAL().millis();  // don't blank again right away
+    queue_event("screensaver_off");
+    mclog::tagInfo(_tag, "screensaver off");
+}
+
+// Counts as use (keeps or ends an auto screensaver), e.g. a new picture.
 void AppEmbodyMode::wake_screen()
 {
-    lv_display_trigger_activity(nullptr);
+    _last_activity = GetHAL().millis();
 }

@@ -72,10 +72,17 @@ private:
     // "LIVE" badge on the top layer while the camera or microphone streams
     lv_obj_t* _live_badge = nullptr;
 
-    // Screensaver: a blank screen after CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S without touch.
-    // The Embody screen stays intact underneath and is loaded back on wake.
+    // Screensaver: a blank screen. "Auto" after CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S
+    // without touch or command (commands and live media count as use); "manual"
+    // from a double tap or the screensaver command, and only a touch or
+    // "screensaver off" ends it. The Embody screen stays intact underneath.
     lv_obj_t* _blank_screen = nullptr;
     lv_obj_t* _prev_screen  = nullptr;
+    bool _blank_manual      = false;
+    uint32_t _blank_since   = 0;
+    uint32_t _last_activity = 0;  // last command, picture or live media (ms)
+    uint32_t _seen_commands = 0;  // embody::Client::commandCount() already counted
+    std::atomic<bool> _blank_requested{false};  // double tap, set from the LVGL task
 
     bool _qr_visible = true;
     int _rendered_viewers = 0;
@@ -119,6 +126,8 @@ private:
     void create_view();
     void render();
     void update_screensaver();
+    void enter_blank(bool manual);
+    void leave_blank();
     void wake_screen();
     void run_command(const std::string& command, const std::string& args);
     void queue_event(const char* name, embody::Client::Telemetry data = {});
