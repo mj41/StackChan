@@ -27,6 +27,7 @@
 #include <sdkconfig.h>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -171,6 +172,7 @@ void AppEmbodyMode::onOpen()
         }
     });
     _head_connection = GetHAL().onHeadPetGesture.connect([this](HeadPetGesture gesture) {
+        _last_physical = GetHAL().millis();  // wakes the screen like a touch
         switch (gesture) {
             case HeadPetGesture::Press:
                 queue_event("head_press");
@@ -239,6 +241,8 @@ void AppEmbodyMode::onRunning()
         send_mic_audio();
     }
 
+    update_leds();
+
     LvglLockGuard lock;
     for (const auto& [command, args] : _pending_commands) {
         run_command(command, args);
@@ -283,6 +287,7 @@ void AppEmbodyMode::onClose()
     stop_nfc();
     _nfc.reset();
     _nfc_enabled = false;
+    stop_led_effect(false);
     _camera_on = false;
     if (_client) {
         GetHAL().onImuMotionEvent.disconnect(_imu_connection);
@@ -615,13 +620,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         _nfc_enabled = _nfc && (args["on"] | true);
         _nfc_enabled ? start_nfc() : stop_nfc();
     } else if (command == "leds") {
-        uint32_t color = 0;
-        if (parse_hex_color(args["left"] | "", color)) {
-            sc.leftNeonLight().setColor(color);
-        }
-        if (parse_hex_color(args["right"] | "", color)) {
-            sc.rightNeonLight().setColor(color);
-        }
+        run_leds(args);
     } else if (command == "brightness") {
         GetHAL().setBackLightBrightness(std::clamp(args["value"] | 60, 1, 100));
     } else if (command == "volume") {
@@ -810,7 +809,7 @@ void AppEmbodyMode::update_screensaver()
         return;  // standby owns the screen
     }
     const uint32_t now        = GetHAL().millis();
-    const uint32_t touch_idle = lv_display_get_inactive_time(nullptr);
+    const uint32_t touch_idle = touch_idle_ms();
     const uint32_t use_idle   = std::min(touch_idle, now - _last_activity);
 
     if (_blank_requested.exchange(false)) {
@@ -875,6 +874,12 @@ void AppEmbodyMode::wake_screen()
     _last_activity = GetHAL().millis();
 }
 
+// Time since someone touched the robot: the screen, the head, or an NFC tag.
+uint32_t AppEmbodyMode::touch_idle_ms()
+{
+    return std::min<uint32_t>(lv_display_get_inactive_time(nullptr), GetHAL().millis() - _last_physical);
+}
+
 /* --------------------------------- Standby -------------------------------- */
 
 // Soft standby for N minutes: tell the server, then go offline with the
@@ -889,6 +894,8 @@ void AppEmbodyMode::start_standby(int minutes)
     stop_nfc();
     _camera_on = false;
     auto& sc   = GetStackChan();
+    stop_led_effect(false);
+    _led_left = _led_right = 0;
     sc.leftNeonLight().setColor((uint32_t)0);
     sc.rightNeonLight().setColor((uint32_t)0);
     enter_blank(true);
@@ -911,7 +918,7 @@ void AppEmbodyMode::update_standby()
         return;
     }
     const uint32_t now = GetHAL().millis();
-    bool touched       = lv_display_get_inactive_time(nullptr) < now - _standby_since;
+    bool touched       = touch_idle_ms() < now - _standby_since;
     if (!touched && (int32_t)(now - _standby_until) < 0) {
         return;
     }
@@ -1036,6 +1043,149 @@ void AppEmbodyMode::speaker_task(void* arg)
     vTaskDelete(nullptr);
 }
 
+/* ---------------------------------- LEDs ---------------------------------- */
+
+static constexpr int _leds_per_side          = 6;
+static constexpr uint32_t _led_frame_ms      = 40;  // 25 fps
+static constexpr uint32_t _led_max_seconds   = 3600;
+
+static void set_pixel(int index, uint32_t color, float level = 1.0f)
+{
+    level = std::clamp(level, 0.0f, 1.0f);
+    GetHAL().setRgbColor(index, (uint8_t)(((color >> 16) & 0xFF) * level), (uint8_t)(((color >> 8) & 0xFF) * level),
+                         (uint8_t)((color & 0xFF) * level));
+}
+
+// Hue 0..1 to a fully saturated colour at 60 % (a rainbow at full power is glaring).
+static uint32_t hue_color(float hue)
+{
+    const float x = (hue - std::floor(hue)) * 6.0f;
+    const float f = x - std::floor(x);
+    float r = 0, g = 0, b = 0;
+    switch ((int)x % 6) {
+        case 0: r = 1, g = f; break;
+        case 1: r = 1 - f, g = 1; break;
+        case 2: g = 1, b = f; break;
+        case 3: g = 1 - f, b = 1; break;
+        case 4: r = f, b = 1; break;
+        default: r = 1, b = 1 - f; break;
+    }
+    return ((uint32_t)(r * 153) << 16) | ((uint32_t)(g * 153) << 8) | (uint32_t)(b * 153);
+}
+
+// "leds" args, all optional, applied in this order:
+//   {"left": "#rrggbb", "right": "#rrggbb"}  fade a whole side
+//   {"pixels": ["#rrggbb" or null, ...]}     up to 12 single LEDs, left 0-5 then right 6-11
+//   {"effect": "rainbow|breathe|chase|blink|off", "color": "#rrggbb", "speed": 0.2..5, "seconds": 0..3600}
+// Sides and pixels stop a running effect. A timed effect restores the side colours when it ends.
+void AppEmbodyMode::run_leds(const ArduinoJson::JsonDocument& args)
+{
+    auto& sc       = GetStackChan();
+    uint32_t color = 0;
+    if (parse_hex_color(args["left"] | "", color)) {
+        stop_led_effect(false);
+        _led_left = color;
+        sc.leftNeonLight().setColor(color);
+    }
+    if (parse_hex_color(args["right"] | "", color)) {
+        stop_led_effect(false);
+        _led_right = color;
+        sc.rightNeonLight().setColor(color);
+    }
+
+    auto pixels = args["pixels"].as<ArduinoJson::JsonArrayConst>();
+    if (!pixels.isNull()) {
+        stop_led_effect(false);
+        for (size_t i = 0; i < pixels.size() && i < 2 * _leds_per_side; i++) {
+            if (parse_hex_color(pixels[i] | "", color)) {
+                set_pixel(i, color);
+            }
+        }
+        GetHAL().refreshRgb();
+    }
+
+    const std::string effect = args["effect"] | "";
+    if (effect.empty()) {
+        return;
+    }
+    static constexpr std::pair<const char*, LedEffect> effects[] = {
+        {"rainbow", LedEffect::Rainbow}, {"breathe", LedEffect::Breathe},
+        {"chase", LedEffect::Chase},     {"blink", LedEffect::Blink},
+    };
+    auto it = std::find_if(std::begin(effects), std::end(effects), [&](const auto& e) { return effect == e.first; });
+    if (it == std::end(effects)) {  // "off", or an effect this firmware doesn't know
+        stop_led_effect(false);
+        _led_left = _led_right = 0;
+        sc.leftNeonLight().setColor((uint32_t)0);
+        sc.rightNeonLight().setColor((uint32_t)0);
+        return;
+    }
+    _led_effect = it->second;
+    _led_color  = parse_hex_color(args["color"] | "", color) ? color : 0xFFFFFF;
+    _led_speed  = std::clamp(args["speed"] | 1.0f, 0.2f, 5.0f);
+    _led_start  = GetHAL().millis();
+    const uint32_t seconds = std::min<uint32_t>(args["seconds"] | 0, _led_max_seconds);
+    _led_until             = seconds ? std::max<uint32_t>(_led_start + seconds * 1000, 1) : 0;
+    _led_last_frame        = _led_start - _led_frame_ms;  // draw now
+    mclog::tagInfo(_tag, "leds: {} effect", effect);
+}
+
+void AppEmbodyMode::stop_led_effect(bool restore_sides)
+{
+    if (_led_effect == LedEffect::None) {
+        return;
+    }
+    _led_effect = LedEffect::None;
+    if (restore_sides) {  // NeonLight rewrites all six LEDs of each side
+        GetStackChan().leftNeonLight().setColor(_led_left);
+        GetStackChan().rightNeonLight().setColor(_led_right);
+    }
+}
+
+// Draws the running effect, both sides mirrored.
+void AppEmbodyMode::update_leds()
+{
+    if (_led_effect == LedEffect::None) {
+        return;
+    }
+    const uint32_t now = GetHAL().millis();
+    if (_led_until && (int32_t)(now - _led_until) >= 0) {
+        stop_led_effect(true);
+        return;
+    }
+    if (now - _led_last_frame < _led_frame_ms) {
+        return;
+    }
+    _led_last_frame = now;
+    const float t   = (now - _led_start) / 1000.0f * _led_speed;  // effect time, seconds at speed 1
+
+    for (int i = 0; i < _leds_per_side; i++) {
+        uint32_t color = _led_color;
+        float level    = 1.0f;
+        switch (_led_effect) {
+            case LedEffect::Rainbow:  // one turn every 5 s, spread over the side
+                color = hue_color(t / 5.0f + (float)i / _leds_per_side);
+                break;
+            case LedEffect::Breathe:  // 2.5 s per breath
+                level = 0.5f - 0.5f * std::cos(2.0f * (float)M_PI * t / 2.5f);
+                break;
+            case LedEffect::Chase: {  // a dot with a fading tail, 6 LEDs per second
+                float d = std::fmod(t * _leds_per_side - i, (float)_leds_per_side);
+                level   = std::max(0.0f, 1.0f - (d < 0 ? d + _leds_per_side : d) / 2.5f);
+                break;
+            }
+            case LedEffect::Blink:  // once per second
+                level = std::fmod(t, 1.0f) < 0.5f ? 1.0f : 0.0f;
+                break;
+            default:
+                break;
+        }
+        set_pixel(i, color, level);
+        set_pixel(i + _leds_per_side, color, level);
+    }
+    GetHAL().refreshRgb();
+}
+
 /* ----------------------------------- NFC ---------------------------------- */
 
 void AppEmbodyMode::start_nfc()
@@ -1107,6 +1257,7 @@ void AppEmbodyMode::nfc_task(void* arg)
                 uid += b;
             }
             if (uid != present) {
+                self->_last_physical   = GetHAL().millis();  // a new tag wakes the screen like a touch
                 const std::string text = tag.sak == 0x00 ? nfc.readNdefText() : "";
                 nfc.halt();
                 present = uid;

@@ -19,6 +19,7 @@
 #include <vector>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
+#include <ArduinoJson.hpp>
 
 class LvglAllocatedImage;
 
@@ -86,6 +87,9 @@ private:
     uint32_t _last_activity = 0;  // last command, picture or live media (ms)
     uint32_t _seen_commands = 0;  // embody::Client::commandCount() already counted
     std::atomic<bool> _blank_requested{false};  // double tap, set from the LVGL task
+    // Touching the robot outside the screen counts like a screen touch: a head
+    // press or swipe, or a new NFC tag (ms; set from the head-touch and NFC tasks).
+    std::atomic<uint32_t> _last_physical{0};
 
     // Standby (the "standby" command): offline, backlight off, blank screen,
     // LEDs/camera/mic off, until _standby_until or a touch.
@@ -136,6 +140,18 @@ private:
     std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec
     uint32_t _speaking_until = 0;
 
+    // LEDs: 12 pixels, left 0-5 and right 6-11. "leds" fades a side (NeonLight),
+    // sets single pixels, or runs an effect that update_leds() draws in the app loop.
+    enum class LedEffect { None, Rainbow, Breathe, Chase, Blink };
+    LedEffect _led_effect    = LedEffect::None;
+    uint32_t _led_color      = 0xFFFFFF;  // effect colour
+    float _led_speed         = 1.0f;
+    uint32_t _led_start      = 0;
+    uint32_t _led_until      = 0;  // ms; 0 = until the next "leds"
+    uint32_t _led_last_frame = 0;
+    uint32_t _led_left       = 0;  // side colours, restored when a timed effect ends
+    uint32_t _led_right      = 0;
+
     // NFC: a task polls the ST25R3916 reader (the RF field is on only while it
     // polls) and reports "nfc_tag" / "nfc_removed" events. On by default when
     // the reader answers; the "nfc" command switches polling.
@@ -163,6 +179,7 @@ private:
     void enter_blank(bool manual);
     void leave_blank();
     void wake_screen();
+    uint32_t touch_idle_ms();
     void run_command(const std::string& command, const std::string& args);
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
@@ -177,6 +194,9 @@ private:
     void queue_speaker_audio(const std::string& payload);
     void stop_speaker();
     static void speaker_task(void* arg);
+    void run_leds(const ArduinoJson::JsonDocument& args);
+    void update_leds();
+    void stop_led_effect(bool restore_sides);
     void start_nfc();
     void stop_nfc();
     static void nfc_task(void* arg);

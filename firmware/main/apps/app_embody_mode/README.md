@@ -11,13 +11,13 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
    - **Long press:** toggles the QR code, so another viewer can pair.
    - **Double tap:** blanks the screen (manual screensaver).
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
-5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. There are two kinds:
+5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. A "touch" below means the screen, a head press or swipe, or a new NFC tag. There are two kinds:
    - **Auto:** after `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S` (default 60 s, 0 = never) without touch, command, picture or live media. Every command, even `ping`, counts as use, so a remotely used robot never blanks by itself. Touch or a command wakes it.
    - **Manual:** a double tap or the `screensaver {"on": true}` command. It stays blank until a touch or `screensaver {"on": false}`.
    - **Reporting:** events `screensaver_on {manual}` and `screensaver_off`, and telemetry `screensaver` (0 off, 1 auto, 2 manual).
 6. **Standby:** the `standby {"minutes"}` command (1–120) sends a `standby` event and then disconnects.
    - **While away:** backlight, LEDs, camera and mic are off and the screen is blank. The servos already release torque when idle.
-   - **Coming back:** when the time is up, or immediately on a touch, it restores the brightness and reconnects, then sends `standby_end {touched}`.
+   - **Coming back:** when the time is up, or immediately on a touch (screen or head), it restores the brightness and reconnects, then sends `standby_end {touched}`.
    - **Events:** any events raised while offline wait and go out after reconnecting.
 7. **Closing:** swiping up closes the app and warm-reboots to the launcher. Wi-Fi can't be stopped cleanly, which is the same reason AVATAR reboots.
 
@@ -49,6 +49,7 @@ Other options in the same menu:
 | Camera | `StreamCaptures()`, then `image_to_jpeg` (quality 25), sent as binary `0x01` every 200 ms while on |
 | Microphone | a FreeRTOS task reads the audio codec at 24 kHz, channel 1 (as in the SETUP mic test). Sent as binary `0x02` in 50 ms messages |
 | Speaker | binary `0x03` PCM is resampled to the codec's 24 kHz and queued (max ~3 s). A FreeRTOS task writes 20 ms chunks with `OutputData` and switches output off after 0.5 s of silence. The mouth moves while it plays, and the audio counts as use for the screensaver |
+| LEDs | `leds` args: `left`/`right` fade a whole side (NeonLight); `pixels` sets up to 12 single LEDs (left 0–5, then right 6–11; `null` skips one); `effect` `rainbow`, `breathe`, `chase`, `blink` or `off`, with `color`, `speed` (0.2–5) and `seconds` (0 = until the next `leds`). Effects are drawn at 25 fps in the app loop, both sides mirrored; a timed effect restores the side colours when it ends |
 | NFC | `hal/drivers/ST25R3916`: a minimal ISO14443A reader ported from M5Stack's UiFlow2 driver (MIT). A FreeRTOS task (priority 1, core 1) polls twice a second with the RF field on only for the ~30 ms of each poll; the chip's IRQ pin isn't wired on StackChan. It reads 4- and 7-byte UIDs and, for Type 2 tags (NTAG, Ultralight), the first NDEF record (URI or text). It stops during standby. `nfc {"on"}` switches polling (on by default) |
 | Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1) |
 | Events | IMU shake, head-touch press and swipes, screen taps, screensaver on/off, standby, `nfc_tag {uid, type, atqa, sak, text}` and `nfc_removed {uid}` (after two missed polls) |
