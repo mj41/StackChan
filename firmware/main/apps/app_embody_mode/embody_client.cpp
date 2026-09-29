@@ -9,6 +9,7 @@
 #include <web_socket.h>
 #include <mooncake_log.h>
 #include <ArduinoJson.hpp>
+#include <esp_timer.h>
 #include <algorithm>
 
 using namespace embody;
@@ -74,13 +75,20 @@ void Client::update()
         return;
     }
 
-    std::queue<std::string> inbox;
+    std::queue<Inbound> inbox;
     {
         std::lock_guard<std::mutex> lock(_mutex);
         std::swap(inbox, _inbox);
     }
     while (!inbox.empty()) {
-        handle_frame(inbox.front());
+        const auto& in = inbox.front();
+        if (in.binary) {
+            if (onBinary) {
+                onBinary((uint8_t)in.text[0], in.text.substr(1));
+            }
+        } else {
+            handle_frame(in);
+        }
         inbox.pop();
     }
 
@@ -123,11 +131,11 @@ void Client::connect()
     _ws->SetHeader("Authorization", ("Bearer " + _config.token).c_str());
     _ws->SetHeader("X-Yolovm-Worker-Id", _config.robotId.c_str());
     _ws->OnData([this](const char* data, size_t len, bool binary) {
-        if (binary) {
+        if (len == 0 || len > 256 * 1024) {
             return;
         }
         std::lock_guard<std::mutex> lock(_mutex);
-        _inbox.emplace(data, len);
+        _inbox.push({std::string(data, len), esp_timer_get_time(), binary});
     });
 
     if (!_ws->Connect(url.c_str())) {
@@ -159,10 +167,10 @@ void Client::connect()
     send(frame);
 }
 
-void Client::handle_frame(const std::string& text)
+void Client::handle_frame(const Inbound& in)
 {
     ArduinoJson::JsonDocument doc;
-    if (auto err = ArduinoJson::deserializeJson(doc, text); err) {
+    if (auto err = ArduinoJson::deserializeJson(doc, in.text); err) {
         mclog::tagWarn(_tag, "bad frame: {}", err.c_str());
         return;
     }
@@ -190,9 +198,26 @@ void Client::handle_frame(const std::string& text)
         _revision++;
     } else if (kind == "RobotCommand") {
         std::string command = body["command"] | "";
+        if (command == "ping") {
+            // Answer right here: queue_ms is how long the ping waited for the app loop.
+            ArduinoJson::JsonDocument pong;
+            pong["kind"] = "RobotPong";
+            pong["meta"].to<ArduinoJson::JsonObject>();
+            pong["body"]["id"]       = body["args"]["id"] | "";
+            pong["body"]["queue_ms"] = (esp_timer_get_time() - in.rxUs) / 1000.0;
+            std::string frame;
+            ArduinoJson::serializeJson(pong, frame);
+            send(frame);
+            return;
+        }
         mclog::tagInfo(_tag, "command: {}", command);
         if (onCommand && !command.empty()) {
-            onCommand(command);
+            std::string args = "{}";
+            if (body["args"].is<ArduinoJson::JsonObject>()) {
+                args.clear();
+                ArduinoJson::serializeJson(body["args"], args);
+            }
+            onCommand(command, args);
         }
     }
 }
@@ -220,4 +245,40 @@ void Client::send_telemetry()
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
     send(frame);
+}
+
+void Client::sendEvent(const std::string& name, const Telemetry& data)
+{
+    if (_state != State::Registered) {
+        return;
+    }
+    ArduinoJson::JsonDocument doc;
+    doc["kind"] = "RobotEvent";
+    doc["meta"].to<ArduinoJson::JsonObject>();
+    doc["body"]["name"] = name;
+    if (!data.empty()) {
+        auto obj = doc["body"]["data"].to<ArduinoJson::JsonObject>();
+        for (const auto& [key, value] : data) {
+            obj[key] = value;
+        }
+    }
+    std::string frame;
+    ArduinoJson::serializeJson(doc, frame);
+    send(frame);
+}
+
+bool Client::sendBinary(uint8_t type, const uint8_t* data, size_t len)
+{
+    if (_state != State::Registered || !_ws || !_ws->IsConnected()) {
+        return false;
+    }
+    if (len + 1 > 65535) {  // xiaozhi WebSocket::Send limit
+        mclog::tagWarn(_tag, "binary message too large: {} bytes", len + 1);
+        return false;
+    }
+    std::string msg;
+    msg.reserve(len + 1);
+    msg.push_back((char)type);
+    msg.append((const char*)data, len);
+    return _ws->Send(msg.data(), msg.size(), true);
 }

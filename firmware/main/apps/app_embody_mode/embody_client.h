@@ -71,15 +71,36 @@ public:
         return _revision;
     }
 
-    std::function<void(const std::string& command)> onCommand;
+    // args is the command's JSON "args" object (or "{}"). "ping" is answered here.
+    std::function<void(const std::string& command, const std::string& args)> onCommand;
     std::function<Telemetry()> collectTelemetry;
+
+    // Binary messages from the server (e.g. 0x10 picture): type byte, then payload.
+    std::function<void(uint8_t type, const std::string& payload)> onBinary;
+
+    // Report something that happened on the robot, e.g. "shake", optionally with
+    // numeric data such as {x, y}. Dropped while offline.
+    void sendEvent(const std::string& name, const Telemetry& data = {});
+
+    // Send a binary message (type byte + payload), e.g. a camera frame. Main loop only.
+    bool sendBinary(uint8_t type, const uint8_t* data, size_t len);
+
+    bool isRegistered() const
+    {
+        return _state == State::Registered;
+    }
 
 private:
     Config _config;
     std::unique_ptr<WebSocket> _ws;
 
     std::mutex _mutex;
-    std::queue<std::string> _inbox;  // text frames from the WebSocket task
+    struct Inbound {
+        std::string text;  // JSON, or type byte + payload when binary
+        int64_t rxUs;      // esp_timer time the frame arrived, for ping queue time
+        bool binary;
+    };
+    std::queue<Inbound> _inbox;  // text frames from the WebSocket task
 
     State _state = State::Connecting;
     std::string _status_text;
@@ -96,7 +117,7 @@ private:
     void set_state(State state, std::string statusText);
     void connect();
     void schedule_retry(State state, std::string statusText, uint32_t delayMs);
-    void handle_frame(const std::string& text);
+    void handle_frame(const Inbound& in);
     bool send(const std::string& frame);
     void send_telemetry();
 };
