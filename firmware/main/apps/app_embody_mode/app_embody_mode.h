@@ -210,6 +210,17 @@ private:
     std::atomic<bool> _spk_running{false};
     std::atomic<TaskHandle_t> _spk_task{nullptr};  // cleared by the task when it exits
     std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec
+
+    // A stored sound ("play" a WAV from the file store), fed to the speaker in pieces
+    // so it is never more than about half a second ahead.
+    FILE* _snd_file = nullptr;
+    std::string _snd_asset;
+    uint32_t _snd_left = 0;  // data bytes left
+    int _snd_rate = 0, _snd_channels = 0;
+    float _snd_gain = 1.0f;
+    void start_sound(const std::string& asset, float gain);
+    void stop_sound(bool finished);
+    void update_sound();
     uint32_t _speaking_until = 0;
 
     // LEDs: 12 pixels, left 0-5 and right 6-11. "leds" fades a side (NeonLight),

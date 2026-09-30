@@ -177,6 +177,8 @@ void AppEmbodyMode::onOpen()
     commands.push_back("touch_stream");
     commands.push_back("light_stream");
     commands.push_back("assets");
+    commands.push_back("play");
+    commands.push_back("play_stop");
     commands.push_back("sprite");
     commands.push_back("sprite_hide");
     commands.push_back("sprite_clear");
@@ -330,6 +332,7 @@ void AppEmbodyMode::onRunning()
         take_snapshot();
     }
     update_leds();
+    update_sound();
     update_light();
     update_ir();
     update_power_events();
@@ -381,6 +384,7 @@ void AppEmbodyMode::onClose()
     mclog::tagInfo(_tag, "on close");
 
     stop_mic();
+    stop_sound(false);
     stop_speaker();
     stop_nfc();
     stop_rotate();
@@ -1033,6 +1037,11 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
             const auto why          = _asset_load_errors.find(asset);
             queue_event("sprite_error", {}, {{"id", args["id"] | ""}, {"reason", why != _asset_load_errors.end() ? err + ": " + why->second : err}});
         }
+    } else if (command == "play") {
+        // {"asset": "snd/hello.wav", "volume": 0..100 (of the speaker volume, default 100)}
+        start_sound(args["asset"] | "", std::clamp(args["volume"] | 100.0f, 0.0f, 100.0f) / 100.0f);
+    } else if (command == "play_stop") {
+        stop_sound(false);
     } else if (command == "sprite_hide") {
         _sprite_layer.hide(args["id"] | "");
     } else if (command == "sprite_clear") {
@@ -1445,6 +1454,7 @@ void AppEmbodyMode::start_standby(int minutes)
 {
     minutes = std::clamp(minutes, 1, 120);
     stop_mic();
+    stop_sound(false);
     stop_speaker();
     stop_nfc();
     stop_rotate();
@@ -2406,5 +2416,126 @@ void AppEmbodyMode::prepare_pictures()
         } else {
             _asset_load_errors[asset] = err;
         }
+    }
+}
+
+/* ------------------------------ Stored sounds ----------------------------- */
+
+static uint32_t le32(const uint8_t* b)
+{
+    return b[0] | (b[1] << 8) | (b[2] << 16) | ((uint32_t)b[3] << 24);
+}
+
+// start_sound opens a WAV (PCM, 16-bit, mono or stereo, any rate) from the file store;
+// update_sound feeds it to the speaker. A new sound replaces the one playing.
+void AppEmbodyMode::start_sound(const std::string& asset, float gain)
+{
+    stop_sound(false);
+    const std::string path = _assets.path(asset);
+    FILE* f                = path.empty() ? nullptr : fopen(path.c_str(), "rb");
+    auto fail              = [&](const char* reason) {
+        if (f) {
+            fclose(f);
+        }
+        queue_event("sound_error", {}, {{"asset", asset}, {"reason", reason}});
+    };
+    if (!f) {
+        fail("no such file");
+        return;
+    }
+    uint8_t riff[12];
+    if (fread(riff, 1, 12, f) != 12 || std::memcmp(riff, "RIFF", 4) != 0 || std::memcmp(riff + 8, "WAVE", 4) != 0) {
+        fail("not a WAV file");
+        return;
+    }
+    int format = 0, channels = 0, rate = 0, bits = 0;
+    uint8_t head[8];
+    while (fread(head, 1, 8, f) == 8) {  // chunks: fmt, then data (others skipped)
+        const uint32_t size = le32(head + 4);
+        if (std::memcmp(head, "fmt ", 4) == 0 && size >= 16) {
+            uint8_t fmt[16];
+            if (fread(fmt, 1, 16, f) != 16) {
+                break;
+            }
+            format   = fmt[0] | (fmt[1] << 8);
+            channels = fmt[2] | (fmt[3] << 8);
+            rate     = (int)le32(fmt + 4);
+            bits     = fmt[14] | (fmt[15] << 8);
+            fseek(f, (long)(size - 16 + (size & 1)), SEEK_CUR);
+        } else if (std::memcmp(head, "data", 4) == 0) {
+            if (format != 1 || bits != 16 || channels < 1 || channels > 2 || rate < 4000 || rate > 48000) {
+                fail("need 16-bit PCM WAV, mono or stereo, 4-48 kHz");
+                return;
+            }
+            _snd_file     = f;
+            _snd_asset    = asset;
+            _snd_left     = size;
+            _snd_rate     = rate;
+            _snd_channels = channels;
+            _snd_gain     = gain;
+            mclog::tagInfo(_tag, "play {} ({} Hz, {} ch, {} ms)", asset, rate, channels,
+                           (int)((uint64_t)size * 1000 / (rate * 2 * channels)));
+            return;
+        } else {
+            fseek(f, (long)(size + (size & 1)), SEEK_CUR);
+        }
+    }
+    fail("no audio data");
+}
+
+void AppEmbodyMode::stop_sound(bool finished)
+{
+    if (!_snd_file) {
+        return;
+    }
+    fclose(_snd_file);
+    _snd_file = nullptr;
+    if (finished) {
+        queue_event("sound_done", {}, {{"asset", _snd_asset}});
+    }
+    _snd_asset.clear();
+}
+
+void AppEmbodyMode::update_sound()
+{
+    if (!_snd_file) {
+        return;
+    }
+    auto codec = Board::GetInstance().GetAudioCodec();
+    if (!codec) {
+        stop_sound(false);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> lock(_spk_mutex);
+        if (_spk_samples.size() > (size_t)codec->output_sample_rate() / 2) {
+            return;  // half a second is queued: enough
+        }
+    }
+    const size_t frame = 2 * _snd_channels;
+    uint8_t buf[4096];
+    const size_t want = std::min<size_t>(_snd_left, sizeof(buf) / frame * frame);
+    const size_t got  = fread(buf, 1, want, _snd_file) / frame * frame;
+    // The speaker message layout: uint16 LE rate, then mono s16le (stereo is mixed down).
+    std::string payload;
+    payload.reserve(2 + got / _snd_channels);
+    payload.push_back((char)(_snd_rate & 0xFF));
+    payload.push_back((char)(_snd_rate >> 8));
+    for (size_t i = 0; i < got; i += frame) {
+        int32_t sum = 0;
+        for (int c = 0; c < _snd_channels; c++) {
+            int16_t s;
+            std::memcpy(&s, buf + i + 2 * c, 2);
+            sum += s;
+        }
+        const int16_t v = (int16_t)std::clamp<int32_t>((int32_t)(sum / _snd_channels * _snd_gain), -32768, 32767);
+        payload.append((const char*)&v, 2);
+    }
+    if (payload.size() > 2) {
+        queue_speaker_audio(payload);
+    }
+    _snd_left -= got;
+    if (_snd_left == 0 || got < want) {
+        stop_sound(true);
     }
 }
