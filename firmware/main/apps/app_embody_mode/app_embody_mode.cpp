@@ -20,6 +20,7 @@
 #include <lvgl_image.h>
 #include <jpg/image_to_jpeg.h>
 #include <ArduinoJson.hpp>
+#include <driver/usb_serial_jtag.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
 #include <esp_timer.h>
@@ -173,7 +174,7 @@ void AppEmbodyMode::onOpen()
                          "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
                          "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
                          "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
-                         "hold_s"},
+                         "hold_s", "usb_data"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -626,6 +627,8 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         t.emplace_back("pmic_status1", (float)pmic.status1);
         t.emplace_back("pmic_status2", (float)pmic.status2);
     }
+    // A computer on the CoreS3's USB-C (it sends USB frames; a charger or power bank does not)
+    t.emplace_back("usb_data", usb_serial_jtag_is_connected() ? 1.0f : 0.0f);
     // Body battery (INA226 on the Power board), raw
     INA226::Reading body;
     if (_body_power && _body_power->read(body)) {
