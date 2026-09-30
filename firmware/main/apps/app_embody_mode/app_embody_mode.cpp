@@ -157,6 +157,7 @@ void AppEmbodyMode::onOpen()
         commands.push_back("proximity");
     }
     commands.push_back("power_led");
+    commands.push_back("hold");
 
     _client = std::make_unique<embody::Client>(embody::Client::Config{
         .serverUrl = server_url,
@@ -171,7 +172,8 @@ void AppEmbodyMode::onOpen()
                          "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
                          "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
                          "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
-                         "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv"},
+                         "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
+                         "hold_s"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -196,6 +198,7 @@ void AppEmbodyMode::onOpen()
             {"brightness_pct", (float)GetHAL().getBackLightBrightness()},
             {"volume_pct", (float)GetHAL().getSpeakerVolume()},
             {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
+            {"hold_s", _hold_until ? (float)(((int32_t)(_hold_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
         };
         add_sensor_telemetry(t);
         return t;
@@ -325,6 +328,7 @@ void AppEmbodyMode::onRunning()
     }
 
     update_motion();
+    update_hold();
     render();
     update_standby();
     update_screensaver();
@@ -340,6 +344,7 @@ void AppEmbodyMode::onClose()
     stop_mic();
     stop_speaker();
     stop_nfc();
+    stop_hold();
     _nfc.reset();
     _nfc_enabled = false;
     stop_led_effect(false);
@@ -777,6 +782,9 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         _prox_base = -1;  // re-learn the baseline when it comes back
         mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
+    } else if (command == "hold") {
+        const int seconds = args["seconds"] | 0;  // 30..300; 0 = release now
+        seconds > 0 ? start_hold(seconds) : stop_hold();
     } else if (command == "power_led") {
         // Red power/charge LED on the PMIC
         static constexpr std::pair<const char*, int> modes[] = {
@@ -975,6 +983,43 @@ void AppEmbodyMode::update_motion()
     }
 }
 
+// Hold: the target becomes where the head is now (enabling torque would otherwise
+// snap back to the last commanded angle), and torque stays on until _hold_until.
+void AppEmbodyMode::start_hold(int seconds)
+{
+    seconds    = std::clamp(seconds, 30, 300);
+    auto& m    = GetStackChan().motion();
+    pause_angle_sync();
+    m.setAutoTorqueReleaseEnabled(false);
+    m.moveYawWithSpeed(std::clamp(m.getCurrentYawAngle(), _yaw_min, _yaw_max), _motion_speed);
+    m.movePitchWithSpeed(std::clamp(m.getCurrentPitchAngle(), _pitch_min, _pitch_max), _motion_speed);
+    const bool was_holding = _hold_until != 0;
+    _hold_until            = std::max<uint32_t>(GetHAL().millis() + seconds * 1000u, 1);
+    if (!was_holding) {
+        queue_event("hold_on", {{"seconds", (float)seconds}});
+    }
+    mclog::tagInfo(_tag, "hold for {} s", seconds);
+}
+
+void AppEmbodyMode::stop_hold()
+{
+    if (!_hold_until) {
+        return;
+    }
+    _hold_until = 0;
+    GetStackChan().motion().setAutoTorqueReleaseEnabled(true);  // released at rest, ~0.2 s later
+    queue_event("hold_off");
+    mclog::tagInfo(_tag, "hold off");
+}
+
+// Ends a hold when its time is up.
+void AppEmbodyMode::update_hold()
+{
+    if (_hold_until && (int32_t)(GetHAL().millis() - _hold_until) >= 0) {
+        stop_hold();
+    }
+}
+
 /* ------------------------------- Screensaver ------------------------------- */
 
 // Blank screen, two kinds (runs under the LVGL lock):
@@ -1071,6 +1116,7 @@ void AppEmbodyMode::start_standby(int minutes)
     stop_mic();
     stop_speaker();
     stop_nfc();
+    stop_hold();
     _camera_on = false;
     auto& sc   = GetStackChan();
     stop_led_effect(false);

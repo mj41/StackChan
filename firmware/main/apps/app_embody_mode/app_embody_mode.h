@@ -200,6 +200,10 @@ private:
     uint32_t _last_motion_tick  = 0;
     bool _angle_sync_paused     = false;
 
+    // Hold position: torque stays on for a limited time (the "hold" command, 30 s-5 min);
+    // otherwise the firmware releases it at rest and the head can be turned by hand.
+    uint32_t _hold_until = 0;  // ms; 0 = not holding
+
     void create_view();
     void render();
     void update_screensaver();
@@ -219,6 +223,9 @@ private:
     void pause_angle_sync();
     void start_gesture(const GestureStep* steps, size_t count);
     void update_motion();
+    void start_hold(int seconds);
+    void stop_hold();
+    void update_hold();
     void send_camera_frame();
     void start_mic();
     void stop_mic();
