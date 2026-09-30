@@ -37,8 +37,11 @@ public:
     // With hearSelf, the receiver keeps listening, so a reflection of our own
     // signal comes back through receive() (a self-test).
     bool send(const std::vector<uint32_t>& timings, uint32_t carrierHz = 38000, bool hearSelf = false);
-    bool sendNec(uint16_t address, uint8_t command, bool hearSelf = false);
-    static std::vector<uint32_t> necTimings(uint16_t address, uint8_t command);
+    // repeats: NEC repeat codes after the frame, every 108 ms, like a held remote button.
+    bool sendNec(uint16_t address, uint8_t command, bool hearSelf = false, int repeats = 0);
+    static std::vector<uint32_t> necTimings(uint16_t address, uint8_t command, int repeats = 0);
+    // The frame sent 1 + repeats times, gapMs apart (for raw codes).
+    static std::vector<uint32_t> repeated(const std::vector<uint32_t>& frame, int repeats, uint32_t gapMs = 40);
 
     // A received frame, if one arrived (non-blocking). Call it regularly: it also
     // re-arms the receiver. Frames seen while (or just after) sending are our own

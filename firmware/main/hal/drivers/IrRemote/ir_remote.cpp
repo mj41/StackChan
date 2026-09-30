@@ -97,7 +97,7 @@ bool IrRemote::send(const std::vector<uint32_t>& timings, uint32_t carrierHz, bo
     if (carrierHz != _carrier_hz) {
         rmt_carrier_config_t carrier = {};
         carrier.frequency_hz         = std::clamp<uint32_t>(carrierHz, 30000, 60000);
-        carrier.duty_cycle           = 0.33f;
+        carrier.duty_cycle           = 0.5f;  // the LED only gets ~70 mA (51 R from 5 V): use more of each cycle
         if (rmt_apply_carrier(_tx, &carrier) != ESP_OK) {
             return false;
         }
@@ -137,7 +137,7 @@ bool IrRemote::send(const std::vector<uint32_t>& timings, uint32_t carrierHz, bo
     return ok;
 }
 
-std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command)
+std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command, int repeats)
 {
     const uint8_t lo    = address & 0xFF;
     const uint8_t hi    = address > 0xFF ? (address >> 8) : (uint8_t)~lo;  // extended NEC has a 16-bit address
@@ -148,12 +148,38 @@ std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command)
         t.push_back((b[i / 8] >> (i % 8)) & 1 ? NEC_ONE_SPACE : NEC_ZERO_SPACE);  // LSB first
     }
     t.push_back(NEC_BIT_MARK);
+    // Repeat codes (9 ms mark, 2.25 ms space, stop mark), each starting 108 ms after the previous start.
+    constexpr uint32_t period = 108000, repeat_len = NEC_LEAD_MARK + NEC_REPEAT_SPACE + NEC_BIT_MARK;
+    uint32_t frame_len = 0;
+    for (uint32_t v : t) {
+        frame_len += v;
+    }
+    for (int r = 0; r < repeats; r++) {
+        t.push_back(period - (r == 0 ? frame_len : repeat_len));
+        t.push_back(NEC_LEAD_MARK);
+        t.push_back(NEC_REPEAT_SPACE);
+        t.push_back(NEC_BIT_MARK);
+    }
     return t;
 }
 
-bool IrRemote::sendNec(uint16_t address, uint8_t command, bool hearSelf)
+bool IrRemote::sendNec(uint16_t address, uint8_t command, bool hearSelf, int repeats)
 {
-    return send(necTimings(address, command), 38000, hearSelf);
+    return send(necTimings(address, command, repeats), 38000, hearSelf);
+}
+
+std::vector<uint32_t> IrRemote::repeated(const std::vector<uint32_t>& frame, int repeats, uint32_t gapMs)
+{
+    std::vector<uint32_t> t = frame;
+    for (int r = 0; r < repeats && !frame.empty() && t.size() + frame.size() + 1 <= kMaxTimings; r++) {
+        if (frame.size() % 2 == 0) {
+            t.back() += gapMs * 1000;  // the frame already ends with a space
+        } else {
+            t.push_back(gapMs * 1000);
+        }
+        t.insert(t.end(), frame.begin(), frame.end());
+    }
+    return t;
 }
 
 /* --------------------------------- Receive -------------------------------- */
