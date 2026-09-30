@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "embody_client.h"
+#include "asset_store.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
 #include <hal/drivers/IrRemote/ir_remote.h>
@@ -152,6 +153,10 @@ private:
     // telemetry, auto-brightness from the room light (on by default), and an
     // approach wakes the screen like a touch.
     std::unique_ptr<LTR553> _light;
+
+    // Uploaded pictures and sounds (binary 0x11), kept in the userdata partition.
+    embody::AssetStore _assets;
+    void send_asset_list();
     bool _auto_brightness     = false;
     float _lux                = -1;  // smoothed; < 0 until the first reading
     uint16_t _proximity       = 0;

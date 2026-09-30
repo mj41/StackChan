@@ -75,6 +75,7 @@ static constexpr uint8_t _bin_touch       = 0x06;
 static constexpr uint8_t _bin_light       = 0x08;  // count, then (uint32 ms, uint16 ps, uint16 ch0, uint16 ch1) per sample  // frames: (uint32 ms, uint8 n, n x (uint8 id, uint16 x, uint16 y))
 static constexpr uint8_t _bin_speaker_pcm = 0x03;
 static constexpr uint8_t _bin_show_jpeg   = 0x10;
+static constexpr uint8_t _bin_asset_chunk = 0x11;  // server -> robot: an upload chunk (see AssetStore::put)
 
 static constexpr uint32_t _camera_interval_ms = 200;  // up to 5 fps
 static constexpr int _camera_jpeg_quality     = 25;
@@ -175,6 +176,8 @@ void AppEmbodyMode::onOpen()
     commands.push_back("imu_stream");
     commands.push_back("touch_stream");
     commands.push_back("light_stream");
+    commands.push_back("assets");
+    commands.push_back("asset_delete");
     commands.push_back("servo_power");
     commands.push_back("rotate");
     for (const char* c : {"server_add", "server_remove", "server_default", "server_switch"}) {
@@ -188,6 +191,7 @@ void AppEmbodyMode::onOpen()
 
     _robot_id = robot_id;
     _commands = commands;
+    _assets.mount();
     load_servers();
     if (!_default_url.empty()) {
         connect_server(_server_index);
@@ -1012,6 +1016,16 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}; velocity 0 stops
         const int velocity = args["velocity"] | 0;
         velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
+    } else if (command == "assets") {
+        send_asset_list();
+    } else if (command == "asset_delete") {
+        // {"name": "food/cake.png"}
+        const std::string name = args["name"] | "";
+        if (_assets.remove(name)) {
+            queue_event("asset_deleted", {}, {{"name", name}});
+        } else {
+            queue_event("asset_error", {}, {{"name", name}, {"reason", "no such file"}});
+        }
     } else if (command == "light_stream") {
         set_light_stream(args["on"] | false);
     } else if (command == "imu_stream") {
@@ -2017,6 +2031,13 @@ void AppEmbodyMode::connect_server(size_t index)
             _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock
         } else if (type == _bin_speaker_pcm) {
             queue_speaker_audio(payload);
+        } else if (type == _bin_asset_chunk) {
+            const auto res = _assets.put(payload);
+            if (!res.error.empty()) {
+                queue_event("asset_error", {}, {{"name", res.name}, {"reason", res.error}});
+            } else if (res.done) {
+                queue_event("asset_saved", {{"bytes", (double)res.bytes}, {"crc", (double)res.crc}}, {{"name", res.name}});
+            }
         }
     };
     _client->collectTelemetry = [this]() {
@@ -2308,4 +2329,26 @@ void AppEmbodyMode::nfc_task(void* arg)
     }
     self->_nfc_task = nullptr;
     vTaskDelete(nullptr);
+}
+
+/* --------------------------------- Assets --------------------------------- */
+
+// "assets" event: the stored files as JSON text {"files": [{"name", "bytes", "crc"}]},
+// and the space in bytes as data. A server compares it with what it wants there.
+void AppEmbodyMode::send_asset_list()
+{
+    ArduinoJson::JsonDocument doc;
+    auto files = doc["files"].to<ArduinoJson::JsonArray>();
+    for (const auto& e : _assets.list()) {
+        auto o     = files.add<ArduinoJson::JsonObject>();
+        o["name"]  = e.name;
+        o["bytes"] = e.bytes;
+        o["crc"]   = e.crc;
+    }
+    std::string list;
+    ArduinoJson::serializeJson(doc, list);
+    uint64_t total = 0, free = 0;
+    _assets.usage(total, free);
+    queue_event("assets", {{"total", (double)total}, {"free", (double)free}, {"mounted", _assets.mounted() ? 1.0 : 0.0}},
+                {{"list", list}});
 }
