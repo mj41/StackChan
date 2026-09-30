@@ -205,6 +205,25 @@ private:
     // otherwise the firmware releases it at rest and the head can be turned by hand.
     uint32_t _hold_until = 0;  // ms; 0 = not holding
 
+    // Continuous yaw rotation ("rotate"), time-limited and only with "no_head_cable": a cable
+    // in the head's USB-C would wind up (which port is used cannot be detected).
+    uint32_t _rotate_until = 0;  // ms; 0 = not rotating
+    bool _servo_power      = true;
+
+    // Touch: touch_down/touch_up events per finger; raw frames (binary 0x06) while streaming.
+    bool _touch_down[2]         = {};
+    int _touch_x[2]             = {}, _touch_y[2] = {};
+    uint32_t _touch_since[2]    = {};
+    uint32_t _last_touch_poll   = 0;
+    uint32_t _last_touch_send   = 0;
+    bool _touch_streaming       = false;
+    std::string _touch_frames;  // pending stream frames
+    uint16_t _touch_frame_count = 0;
+    uint16_t _light_ch0 = 0, _light_ch1 = 0;
+
+    // Full-resolution still (the "snapshot" command), taken in the app loop.
+    bool _snapshot_requested = false;
+
     // Raw IMU stream (binary 0x05), on while a browser asks for it (the server sends imu_stream).
     bool _imu_streaming      = false;
     uint32_t _last_imu_send  = 0;
@@ -224,6 +243,10 @@ private:
     void update_ir();
     void update_power_events();
     void send_imu_stream();
+    void start_rotate(int velocity, int seconds, bool noHeadCable);
+    void stop_rotate();
+    void update_touch();
+    void take_snapshot();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();

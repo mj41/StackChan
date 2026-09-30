@@ -22,7 +22,8 @@ public:
     void end();
 
     // Ambient light in lux (Lite-On's two-channel formula). False if no valid sample.
-    bool readLux(float& lux);
+    // ch0/ch1 (optional) get the raw counts: CH0 visible + IR, CH1 IR.
+    bool readLux(float& lux, uint16_t* ch0 = nullptr, uint16_t* ch1 = nullptr);
     // Proximity, 0..2047: higher is closer. Relative only; depends on the target.
     bool readProximity(uint16_t& value);
     // Proximity on/off. Off puts it in standby: its IR LED stops pulsing. Light keeps working.

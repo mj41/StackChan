@@ -38,7 +38,7 @@ public:
         std::vector<std::string> measurements;
     };
 
-    using Telemetry = std::vector<std::pair<std::string, float>>;
+    using Telemetry = std::vector<std::pair<std::string, double>>;  // double: Unix times need it
     using Texts     = std::vector<std::pair<std::string, std::string>>;
 
     explicit Client(Config config);

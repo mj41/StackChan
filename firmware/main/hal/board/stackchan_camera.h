@@ -34,6 +34,7 @@ private:
     uint16_t sensor_height_ = 0;
 #endif  // CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     int video_fd_      = -1;
+    uint32_t pixfmt_   = 0;  // V4L2 pixel format chosen at start-up
     bool streaming_on_ = false;
     struct MmapBuffer {
         void* start   = nullptr;
@@ -51,6 +52,12 @@ public:
     virtual void SetExplainUrl(const std::string& url, const std::string& token);
     virtual bool Capture() override;
     bool StreamCaptures();
+    // Switches the sensor to another YUV422 size it supports (GC0308: 640x480 or 320x240):
+    // stops the stream, sets the sensor format, rebuilds the buffers and restarts.
+    bool SetSensorSize(int width, int height);
+    // Raw sensor register access (GC0308: 8-bit registers), e.g. exposure and gain.
+    bool ReadSensorRegister(uint16_t reg, uint8_t& value);
+    bool WriteSensorRegister(uint16_t reg, uint8_t value);
 
     // 翻转控制函数
     virtual bool SetHMirror(bool enabled) override;

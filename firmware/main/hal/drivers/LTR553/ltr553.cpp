@@ -87,7 +87,7 @@ bool LTR553::rd(uint8_t reg, uint8_t* out, size_t len)
     return i2c_master_transmit_receive(_dev, &reg, 1, out, len, kI2cTimeoutMs) == ESP_OK;
 }
 
-bool LTR553::readLux(float& lux)
+bool LTR553::readLux(float& lux, uint16_t* ch0Out, uint16_t* ch1Out)
 {
     uint8_t status = 0, d[4];
     if (!_dev || !rd(REG_ALS_PS_STATUS, &status, 1) || (status & 0x80) || !rd(REG_ALS_DATA_CH1, d, 4)) {
@@ -95,6 +95,12 @@ bool LTR553::readLux(float& lux)
     }
     const float ch1 = (float)(d[0] | (d[1] << 8));
     const float ch0 = (float)(d[2] | (d[3] << 8));
+    if (ch0Out) {
+        *ch0Out = (uint16_t)ch0;
+    }
+    if (ch1Out) {
+        *ch1Out = (uint16_t)ch1;
+    }
     if (ch0 + ch1 == 0) {
         lux = 0;
         return true;

@@ -61,6 +61,8 @@ static constexpr uint32_t _gesture_step_ms           = 260;
 static constexpr uint8_t _bin_camera_jpeg = 0x01;
 static constexpr uint8_t _bin_audio_multi = 0x04;  // rate, channel count, interleaved PCM
 static constexpr uint8_t _bin_imu         = 0x05;  // count, then (uint32 ms, 9 x float32) per sample
+static constexpr uint8_t _bin_snapshot    = 0x07;  // full-resolution JPEG still
+static constexpr uint8_t _bin_touch       = 0x06;  // frames: (uint32 ms, uint8 n, n x (uint8 id, uint16 x, uint16 y))
 static constexpr uint8_t _bin_speaker_pcm = 0x03;
 static constexpr uint8_t _bin_show_jpeg   = 0x10;
 
@@ -161,6 +163,14 @@ void AppEmbodyMode::onOpen()
     commands.push_back("power_led");
     commands.push_back("hold");
     commands.push_back("imu_stream");
+    commands.push_back("touch_stream");
+    commands.push_back("servo_power");
+    commands.push_back("rotate");
+    if (hal_bridge::board_get_camera()) {
+        commands.push_back("snapshot");
+        commands.push_back("camera_config");
+        commands.push_back("camera_reg");
+    }
 
     _client = std::make_unique<embody::Client>(embody::Client::Config{
         .serverUrl = server_url,
@@ -179,7 +189,8 @@ void AppEmbodyMode::onOpen()
                          "hold_s", "usb_data", "yaw_pos_raw", "yaw_speed_raw", "yaw_current_raw", "yaw_moving",
                          "pitch_voltage_v", "pitch_pos_raw", "pitch_speed_raw", "pitch_current_raw", "pitch_moving",
                          "head_zone0", "head_zone1", "head_zone2", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
-                         "mag_raw_z", "mag_rhall"},
+                         "mag_raw_z", "mag_rhall", "light_ch0", "light_ch1", "rtc_unix", "system_unix", "pmic_ts_raw",
+                         "servo_power", "rotate_s"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -205,6 +216,9 @@ void AppEmbodyMode::onOpen()
             {"volume_pct", (float)GetHAL().getSpeakerVolume()},
             {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
             {"hold_s", _hold_until ? (float)(((int32_t)(_hold_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
+            {"rotate_s", _rotate_until ? (float)(((int32_t)(_rotate_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
+            {"servo_power", _servo_power ? 1.0 : 0.0},
+            {"system_unix", (double)time(nullptr)},
         };
         add_sensor_telemetry(t);
         return t;
@@ -303,6 +317,10 @@ void AppEmbodyMode::onRunning()
         send_imu_stream();
     }
 
+    if (_snapshot_requested) {
+        _snapshot_requested = false;
+        take_snapshot();
+    }
     update_leds();
     update_light();
     update_ir();
@@ -336,6 +354,10 @@ void AppEmbodyMode::onRunning()
 
     update_motion();
     update_hold();
+    if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
+        stop_rotate();
+    }
+    update_touch();
     render();
     update_standby();
     update_screensaver();
@@ -351,7 +373,9 @@ void AppEmbodyMode::onClose()
     stop_mic();
     stop_speaker();
     stop_nfc();
+    stop_rotate();
     stop_hold();
+    _touch_streaming = false;
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
     _nfc.reset();
@@ -635,7 +659,13 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
     t.emplace_back("head_zone1", (float)zones[1]);
     t.emplace_back("head_zone2", (float)zones[2]);
 
+    int64_t rtc = 0;
+    if (GetHAL().getRtcUnix(rtc)) {
+        t.emplace_back("rtc_unix", (double)rtc);
+    }
     if (_light) {
+        t.emplace_back("light_ch0", (double)_light_ch0);  // raw: visible + IR
+        t.emplace_back("light_ch1", (double)_light_ch1);  // raw: IR
         if (_lux >= 0) {
             t.emplace_back("light_lux", round_to(_lux, _lux < 10 ? 0.1f : 1.0f));
         }
@@ -657,6 +687,7 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         t.emplace_back("pmic_temp_c", round_to(pmic.die_temp_c, 0.1f));
         t.emplace_back("pmic_status1", (float)pmic.status1);
         t.emplace_back("pmic_status2", (float)pmic.status2);
+        t.emplace_back("pmic_ts_raw", (double)pmic.ts_raw);  // TS pin ADC (battery thermistor input)
     }
     // A computer on the CoreS3's USB-C (it sends USB frames; a charger or power bank does not)
     t.emplace_back("usb_data", usb_serial_jtag_is_connected() ? 1.0f : 0.0f);
@@ -709,6 +740,10 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
     auto& sc     = GetStackChan();
     auto& motion = sc.motion();
 
+    if (_rotate_until && (command == "nod" || command == "shake" || command == "look" || command == "home" ||
+                          command == "hold")) {
+        stop_rotate();  // any positional head command ends a rotation
+    }
     if (command == "nod") {
         start_gesture(_nod, std::size(_nod));
     } else if (command == "shake") {
@@ -816,6 +851,44 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         _prox_base = -1;  // re-learn the baseline when it comes back
         mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
+    } else if (command == "snapshot") {
+        _snapshot_requested = true;  // taken in the app loop, outside the LVGL lock
+    } else if (command == "camera_config") {
+        // {"mirror": bool, "flip": bool}: sensor mirror / flip (both default off)
+        if (auto camera = hal_bridge::board_get_camera()) {
+            if (args["mirror"].is<bool>()) {
+                camera->SetHMirror(args["mirror"].as<bool>());
+            }
+            if (args["flip"].is<bool>()) {
+                camera->SetVFlip(args["flip"].as<bool>());
+            }
+        }
+    } else if (command == "camera_reg") {
+        // {"reg": n} reads, {"reg": n, "value": v} writes then reads back a raw GC0308 register
+        auto camera   = hal_bridge::board_get_camera();
+        const int reg = args["reg"] | -1;
+        uint8_t value = 0;
+        bool ok       = camera && reg >= 0 && reg <= 0xFFFF;
+        if (ok && args["value"].is<int>()) {
+            ok = camera->WriteSensorRegister(reg, (uint8_t)(args["value"].as<int>() & 0xFF));
+        }
+        ok = ok && camera->ReadSensorRegister(reg, value);
+        queue_event("camera_reg", {{"reg", (double)reg}, {"value", ok ? (double)value : -1.0}});
+    } else if (command == "touch_stream") {
+        _touch_streaming = args["on"] | false;
+        _touch_frames.clear();
+        _touch_frame_count = 0;
+    } else if (command == "servo_power") {
+        // Off: both servos lose power (the head is limp); on: powered again, torque off until the next move
+        stop_rotate();
+        stop_hold();
+        _servo_power = args["on"] | true;
+        GetHAL().setServoPowerEnabled(_servo_power);
+        queue_event(_servo_power ? "servo_power_on" : "servo_power_off");
+    } else if (command == "rotate") {
+        // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}; velocity 0 stops
+        const int velocity = args["velocity"] | 0;
+        velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
     } else if (command == "imu_stream") {
         _imu_streaming = args["on"] | false;
         GetHAL().setImuStreaming(_imu_streaming);
@@ -873,6 +946,52 @@ void AppEmbodyMode::send_camera_frame()
             free(jpeg);
         }
     }
+}
+
+// Full resolution still: switch the sensor to 640x480, let it settle, grab and encode one
+// frame (quality stepped down until it fits one WebSocket message), send it as binary 0x07,
+// and switch back to the 320x240 video mode.
+void AppEmbodyMode::take_snapshot()
+{
+    auto camera = hal_bridge::board_get_camera();
+    if (!camera || !_client) {
+        return;
+    }
+    const int w0 = camera->GetFrameWidth(), h0 = camera->GetFrameHeight();
+    if (!camera->SetSensorSize(640, 480)) {
+        queue_event("snapshot_failed", {}, {{"reason", "the sensor did not switch to 640x480"}});
+        camera->SetSensorSize(w0, h0);
+        return;
+    }
+    bool ok = false;
+    for (int i = 0; i < 5; i++) {  // the first frames after a mode switch can be dark or torn (seen once)
+        ok = camera->StreamCaptures();
+    }
+    size_t sent = 0;
+    if (ok) {
+        for (int quality : {60, 45, 30, 20}) {
+            uint8_t* jpeg = nullptr;
+            size_t len    = 0;
+            if (!image_to_jpeg((uint8_t*)camera->GetFrameData(), camera->GetFrameSize(), camera->GetFrameWidth(),
+                               camera->GetFrameHeight(), (v4l2_pix_fmt_t)camera->GetFrameFormat(), quality, &jpeg,
+                               &len) ||
+                !jpeg) {
+                break;
+            }
+            if (len + 1 <= 65535) {
+                sent = _client->sendBinary(_bin_snapshot, jpeg, len) ? len : 0;
+                free(jpeg);
+                break;
+            }
+            free(jpeg);
+        }
+    }
+    const int w = camera->GetFrameWidth(), h = camera->GetFrameHeight();
+    camera->SetSensorSize(w0, h0);
+    if (!sent) {
+        queue_event("snapshot_failed", {}, {{"reason", ok ? "encoding failed" : "no frame"}});
+    }
+    mclog::tagInfo(_tag, "snapshot {}x{}: {} bytes", w, h, sent);
 }
 
 void AppEmbodyMode::start_mic()
@@ -1157,7 +1276,9 @@ void AppEmbodyMode::start_standby(int minutes)
     stop_mic();
     stop_speaker();
     stop_nfc();
+    stop_rotate();
     stop_hold();
+    _touch_streaming = false;
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
     _camera_on = false;
@@ -1360,7 +1481,7 @@ void AppEmbodyMode::update_light()
     }
 
     float lux = 0;
-    if (now - _last_light_read >= _light_interval_ms && _light->readLux(lux)) {
+    if (now - _last_light_read >= _light_interval_ms && _light->readLux(lux, &_light_ch0, &_light_ch1)) {
         _last_light_read = now;
         _lux             = _lux < 0 ? lux : _lux + (lux - _lux) * 0.3f;
         if (_auto_brightness && !_standby_until) {
@@ -1369,6 +1490,115 @@ void AppEmbodyMode::update_light()
                 GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
             }
         }
+    }
+}
+
+/* -------------------------------- Rotation -------------------------------- */
+
+void AppEmbodyMode::start_rotate(int velocity, int seconds, bool noHeadCable)
+{
+    if (!noHeadCable) {
+        queue_event("rotate_refused", {}, {{"reason", "confirm that no cable is in the head's USB-C (no_head_cable)"}});
+        return;
+    }
+    if (!_servo_power) {
+        queue_event("rotate_refused", {}, {{"reason", "servo power is off"}});
+        return;
+    }
+    velocity = std::clamp(velocity, -1000, 1000);
+    seconds  = std::clamp(seconds, 1, 30);
+    stop_hold();
+    _gesture = nullptr;
+    pause_angle_sync();
+    auto& m = GetStackChan().motion();
+    m.setAutoTorqueReleaseEnabled(false);  // the release check would stop the wheel mode
+    m.yawServo().rotate(velocity);
+    const bool was_rotating = _rotate_until != 0;
+    _rotate_until           = std::max<uint32_t>(GetHAL().millis() + seconds * 1000u, 1);
+    if (!was_rotating) {
+        queue_event("rotate_on", {{"velocity", (double)velocity}, {"seconds", (double)seconds}});
+    }
+    mclog::tagInfo(_tag, "rotate {} for {} s", velocity, seconds);
+}
+
+void AppEmbodyMode::stop_rotate()
+{
+    if (!_rotate_until) {
+        return;
+    }
+    _rotate_until = 0;
+    auto& m       = GetStackChan().motion();
+    m.yawServo().rotate(0);
+    m.setAutoTorqueReleaseEnabled(!_hold_until);
+    _last_motion_tick = GetHAL().millis();
+    queue_event("rotate_off");
+    mclog::tagInfo(_tag, "rotate off");
+}
+
+/* ---------------------------------- Touch --------------------------------- */
+
+// Raw touch points (FT6336, both fingers) every 20 ms: touch_down / touch_up events per
+// finger, and while streaming, frames collected into binary 0x06 sent every 100 ms.
+void AppEmbodyMode::update_touch()
+{
+    const uint32_t now = GetHAL().millis();
+    if (now - _last_touch_poll < 20) {
+        return;
+    }
+    _last_touch_poll = now;
+    hal_bridge::RawTouch raw;
+    if (!hal_bridge::board_get_touch(raw)) {
+        return;
+    }
+    bool present[2] = {};
+    for (int i = 0; i < raw.num; i++) {
+        const int id = raw.id[i] & 1;
+        if (raw.ev[i] == 1) {
+            continue;  // lift-off report
+        }
+        present[id] = true;
+        _touch_x[id] = raw.x[i];
+        _touch_y[id] = raw.y[i];
+        if (!_touch_down[id]) {
+            _touch_down[id]  = true;
+            _touch_since[id] = now;
+            queue_event("touch_down", {{"id", (double)id}, {"x", (double)raw.x[i]}, {"y", (double)raw.y[i]}});
+        }
+    }
+    for (int id = 0; id < 2; id++) {
+        if (_touch_down[id] && !present[id]) {
+            _touch_down[id] = false;
+            queue_event("touch_up", {{"id", (double)id},
+                                     {"x", (double)_touch_x[id]},
+                                     {"y", (double)_touch_y[id]},
+                                     {"ms", (double)(now - _touch_since[id])}});
+        }
+    }
+    if (!_touch_streaming) {
+        return;
+    }
+    // Frame: uint32 ms, uint8 n, then n x (uint8 id, uint16 x, uint16 y), little-endian
+    const uint8_t n = (uint8_t)(present[0] + present[1]);
+    _touch_frames.append((const char*)&now, 4);
+    _touch_frames.push_back((char)n);
+    for (int id = 0; id < 2; id++) {
+        if (present[id]) {
+            const uint16_t x = _touch_x[id], y = _touch_y[id];
+            _touch_frames.push_back((char)id);
+            _touch_frames.append((const char*)&x, 2);
+            _touch_frames.append((const char*)&y, 2);
+        }
+    }
+    _touch_frame_count++;
+    if (now - _last_touch_send >= 100 && _client) {
+        _last_touch_send = now;
+        std::string msg;
+        msg.push_back((char)(_touch_frame_count & 0xFF));
+        msg.push_back((char)(_touch_frame_count >> 8));
+        msg += _touch_frames;
+        _client->sendBinary(_bin_touch, (const uint8_t*)msg.data(), msg.size());
+        _touch_frames.clear();
+        _touch_frame_count = 0;
     }
 }
 
@@ -1674,11 +1904,15 @@ void AppEmbodyMode::nfc_task(void* arg)
             if (uid != present) {
                 self->_last_physical   = GetHAL().millis();  // a new tag wakes the screen like a touch
                 const std::string text = tag.sak == 0x00 ? nfc.readNdefText() : "";
+                const std::string mem  = tag.sak == 0x00 ? nfc.readMemoryHex() : "";  // raw Type 2 memory
                 nfc.halt();
                 present = uid;
                 embody::Client::Texts info = {{"uid", uid}, {"type", nfc_tag_type(tag.sak)}};
                 if (!text.empty()) {
                     info.emplace_back("text", text);
+                }
+                if (!mem.empty()) {
+                    info.emplace_back("mem", mem);
                 }
                 self->queue_event("nfc_tag", {{"atqa", (float)tag.atqa}, {"sak", (float)tag.sak}}, std::move(info));
                 mclog::tagInfo(_tag, "nfc tag {} ({}) {}", uid, nfc_tag_type(tag.sak), text);

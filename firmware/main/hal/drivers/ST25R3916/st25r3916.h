@@ -40,6 +40,9 @@ public:
     // First NDEF record of a Type 2 tag (NTAG) as text: a URI or the text of a "T"
     // record. Empty if there is none. Needs a selected tag.
     std::string readNdefText();
+    // Type 2 tag memory from page 0 as hex, read 4 pages at a time until the tag
+    // stops answering (its end) or maxBytes. Needs a selected tag.
+    std::string readMemoryHex(size_t maxBytes = 1024);
     void halt();
 
 private:

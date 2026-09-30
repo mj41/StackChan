@@ -64,10 +64,20 @@ struct PmicStatus {
     int system_mv    = 0;  // VSYS
     float die_temp_c = 0;
     int battery_pct  = 0;  // fuel gauge
+    int ts_raw       = 0;  // TS pin ADC (battery thermistor input), raw
     uint8_t status1  = 0;  // reg 0x00: bit 5 VBUS good, bit 3 battery present
     uint8_t status2  = 0;  // reg 0x01: bits 6:5 01 charging / 10 discharging / 00 idle, bits 2:0 charge phase
 };
 bool board_get_pmic_status(PmicStatus& out);
+
+// Raw FT6336 touch points (as the controller reports them, 320x240), updated every 20 ms.
+struct RawTouch {
+    int num = 0;               // fingers down, 0-2
+    int x[2] = {}, y[2] = {};  // per point
+    int id[2] = {};            // touch id (0/1), stays with a finger
+    int ev[2] = {};            // event flag: 0 down, 1 up, 2 contact
+};
+bool board_get_touch(RawTouch& out);
 // Power key and plug events since the last call (AXP2101 IRQ status 2, reg 0x49, cleared here):
 // bit 2 long press, 3 short press, 4 battery removed, 5 battery inserted, 6 USB removed, 7 USB inserted.
 uint8_t board_take_pmic_events();

@@ -301,6 +301,8 @@ public:
 
     /* ---------------------------------- Time ---------------------------------- */
     void syncRtcTimeToSystem();
+    // The RTC's own time as Unix seconds (it keeps UTC). False if it can't be read.
+    bool getRtcUnix(int64_t& out);
     void syncSystemTimeToRtc();
     void setTimezone(std::string_view tz);
     std::string getTimezone();

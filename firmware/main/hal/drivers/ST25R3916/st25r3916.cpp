@@ -579,3 +579,20 @@ std::string ST25R3916::readNdefText()
     }
     return "";
 }
+
+std::string ST25R3916::readMemoryHex(size_t maxBytes)
+{
+    static const char* digits = "0123456789ABCDEF";
+    std::string hex;
+    uint8_t page[16];
+    for (unsigned p = 0; p < 256 && hex.size() / 2 < maxBytes; p += 4) {
+        if (!readPages(p, page)) {
+            break;  // past the end of this tag (it NAKs)
+        }
+        for (uint8_t b : page) {
+            hex += digits[b >> 4];
+            hex += digits[b & 0x0F];
+        }
+    }
+    return hex;
+}

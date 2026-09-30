@@ -125,3 +125,25 @@ std::string Hal::getTimezone()
     Settings settings("system", false);
     return settings.GetString("tz", "GMT0");
 }
+
+bool Hal::getRtcUnix(int64_t& out)
+{
+    if (!_pcf8563) {
+        return false;
+    }
+    m5::rtc_date_t date;
+    m5::rtc_time_t time;
+    if (!_pcf8563->getDateTime(&date, &time)) {
+        return false;
+    }
+    // Days from civil (Howard Hinnant), so no TZ juggling is needed
+    int y = date.year, m = date.month, d = date.date;
+    y -= m <= 2;
+    const int era      = (y >= 0 ? y : y - 399) / 400;
+    const unsigned yoe = (unsigned)(y - era * 400);
+    const unsigned doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+    const unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+    const int64_t days = (int64_t)era * 146097 + (int64_t)doe - 719468;
+    out = days * 86400 + time.hours * 3600 + time.minutes * 60 + time.seconds;
+    return true;
+}

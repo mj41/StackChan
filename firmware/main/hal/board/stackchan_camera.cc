@@ -11,6 +11,11 @@
 #include "esp_imgfx_color_convert.h"
 #include "esp_video_device.h"
 #include "esp_video_init.h"
+#include "esp_video_ioctl.h"
+#include "esp_cam_sensor.h"
+
+// Exported by esp_video, but declared only in its private_include/esp_video_device_internal.h
+extern "C" esp_cam_sensor_device_t* esp_video_get_dvp_video_device_sensor(void);
 #include "linux/videodev2.h"
 
 #include "board.h"
@@ -271,6 +276,7 @@ StackChanCamera::StackChanCamera(const esp_video_init_config_t& config)
         return;
     }
 
+    pixfmt_ = setformat.fmt.pix.pixelformat;
 #ifdef CONFIG_XIAOZHI_ENABLE_ROTATE_CAMERA_IMAGE
     frame_.width  = setformat.fmt.pix.height;
     frame_.height = setformat.fmt.pix.width;
@@ -1166,4 +1172,111 @@ std::string StackChanCamera::Explain(const std::string& question)
     ESP_LOGI(TAG, "Explain image size=%d bytes, compressed size=%d, remain stack size=%d, question=%s\n%s",
              (int)frame_.len, (int)total_sent, (int)remain_stack_size, question.c_str(), result.c_str());
     return result;
+}
+
+bool StackChanCamera::SetSensorSize(int width, int height)
+{
+    if (video_fd_ < 0) {
+        return false;
+    }
+    if (encoder_thread_.joinable()) {
+        encoder_thread_.join();
+    }
+    esp_cam_sensor_device_t* dev = esp_video_get_dvp_video_device_sensor();
+    esp_cam_sensor_format_array_t formats = {};
+    if (!dev || esp_cam_sensor_query_format(dev, &formats) != ESP_OK) {
+        ESP_LOGE(TAG, "SetSensorSize: no sensor formats");
+        return false;
+    }
+    const esp_cam_sensor_format_t* want = nullptr;
+    for (uint32_t i = 0; i < formats.count; i++) {
+        const auto& f = formats.format_array[i];
+        if (f.width == width && f.height == height && f.format == ESP_CAM_SENSOR_PIXFORMAT_YUV422) {
+            want = &f;
+            break;
+        }
+    }
+    if (!want) {
+        ESP_LOGE(TAG, "SetSensorSize: %dx%d YUV422 not supported", width, height);
+        return false;
+    }
+
+    // Stop and release the capture buffers
+    int type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(video_fd_, VIDIOC_STREAMOFF, &type);
+    streaming_on_ = false;
+    for (auto& b : mmap_buffers_) {
+        munmap(b.start, b.length);
+    }
+    mmap_buffers_.clear();
+    struct v4l2_requestbuffers req = {};
+    req.type                       = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    req.memory                     = V4L2_MEMORY_MMAP;
+    req.count                      = 0;
+    ioctl(video_fd_, VIDIOC_REQBUFS, &req);
+
+    // New sensor mode; the DVP device takes over its size
+    if (ioctl(video_fd_, VIDIOC_S_SENSOR_FMT, want) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_S_SENSOR_FMT failed, errno=%d", errno);
+        return false;
+    }
+    struct v4l2_format fmt = {};
+    fmt.type               = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+    ioctl(video_fd_, VIDIOC_G_FMT, &fmt);
+    fmt.fmt.pix.pixelformat = pixfmt_;
+    if (ioctl(video_fd_, VIDIOC_S_FMT, &fmt) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_S_FMT %dx%d failed, errno=%d", width, height, errno);
+        return false;
+    }
+    frame_.width  = fmt.fmt.pix.width;
+    frame_.height = fmt.fmt.pix.height;
+
+    req.count = 1;
+    if (ioctl(video_fd_, VIDIOC_REQBUFS, &req) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_REQBUFS failed");
+        return false;
+    }
+    mmap_buffers_.resize(req.count);
+    for (uint32_t i = 0; i < req.count; i++) {
+        struct v4l2_buffer buf = {};
+        buf.type               = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+        buf.memory             = V4L2_MEMORY_MMAP;
+        buf.index              = i;
+        if (ioctl(video_fd_, VIDIOC_QUERYBUF, &buf) != 0) {
+            return false;
+        }
+        void* start = mmap(NULL, buf.length, PROT_READ | PROT_WRITE, MAP_SHARED, video_fd_, buf.m.offset);
+        if (start == MAP_FAILED) {
+            return false;
+        }
+        mmap_buffers_[i] = {start, buf.length};
+        if (ioctl(video_fd_, VIDIOC_QBUF, &buf) != 0) {
+            return false;
+        }
+    }
+    if (ioctl(video_fd_, VIDIOC_STREAMON, &type) != 0) {
+        ESP_LOGE(TAG, "VIDIOC_STREAMON failed");
+        return false;
+    }
+    streaming_on_ = true;
+    ESP_LOGI(TAG, "sensor size now %dx%d", frame_.width, frame_.height);
+    return true;
+}
+
+bool StackChanCamera::ReadSensorRegister(uint16_t reg, uint8_t& value)
+{
+    esp_cam_sensor_device_t* dev = esp_video_get_dvp_video_device_sensor();
+    esp_cam_sensor_reg_val_t rv  = {.regaddr = reg, .value = 0};
+    if (!dev || esp_cam_sensor_ioctl(dev, ESP_CAM_SENSOR_IOC_G_REG, &rv) != ESP_OK) {
+        return false;
+    }
+    value = (uint8_t)rv.value;
+    return true;
+}
+
+bool StackChanCamera::WriteSensorRegister(uint16_t reg, uint8_t value)
+{
+    esp_cam_sensor_device_t* dev = esp_video_get_dvp_video_device_sensor();
+    esp_cam_sensor_reg_val_t rv  = {.regaddr = reg, .value = value};
+    return dev && esp_cam_sensor_ioctl(dev, ESP_CAM_SENSOR_IOC_S_REG, &rv) == ESP_OK;
 }
