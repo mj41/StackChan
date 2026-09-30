@@ -550,7 +550,11 @@ void AppEmbodyMode::create_view()
     _qr_box->removeFlag(LV_OBJ_FLAG_CLICKABLE);
 
     _qr = lv_qrcode_create(_qr_box->get());
-    lv_qrcode_set_size(_qr, 136);
+    // Quiet zone on: LVGL then picks the QR version (up to two above the minimum) that
+    // fills the canvas best, so short and long server URLs both come out as version 4
+    // at 4 px per module instead of 116 px vs 132 px.
+    lv_qrcode_set_size(_qr, 148);
+    lv_qrcode_set_quiet_zone(_qr, true);
     lv_qrcode_set_dark_color(_qr, lv_color_hex(0x000000));
     lv_qrcode_set_light_color(_qr, lv_color_hex(0xFFFFFF));
     lv_obj_center(_qr);
@@ -643,12 +647,12 @@ void AppEmbodyMode::render()
         if (_rendered_revision != UINT32_MAX - 1) {
             _rendered_revision = UINT32_MAX - 1;
             _rendered_url.clear();
-            _status->setText("Not connected");
+            _status->setText("No server pinned");
             lv_obj_add_flag(_qr, LV_OBJ_FLAG_HIDDEN);
-            _qr_hint->setText("Pick a server");
+            _qr_hint->setText("Not connected");
             _qr_hint->setHidden(false);
             _code->setText("");
-            _detail->setText("Next, then Connect");
+            _detail->setText("Next to choose, Connect to start");
         }
         return;
     }
@@ -1911,7 +1915,18 @@ void AppEmbodyMode::connect_server(size_t index)
 {
     index         = std::min(index, _servers.size() - 1);
     _server_index = index;
-    _client.reset();
+    if (_client) {
+        // Closing a TLS socket can block for up to 10 s (esp-ml307 waits for its receive
+        // task), so the old client is destroyed in a task of its own, not in the app loop.
+        // It is no longer updated, so none of its callbacks reach this app any more.
+        auto* old = _client.release();
+        if (xTaskCreate([](void* p) {
+                delete static_cast<embody::Client*>(p);
+                vTaskDelete(nullptr);
+            }, "embody_close", 4096, old, 2, nullptr) != pdPASS) {
+            delete old;
+        }
+    }
     _rendered_revision = UINT32_MAX;
     _rendered_url.clear();
     _rendered_viewers = 0;
