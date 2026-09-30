@@ -190,6 +190,9 @@ void SpriteLayer::place(Sprite& s, int ms)
         lv_anim_set_exec_cb(&a, exec);
         lv_anim_start(&a);
     };
+    // Coordinates are only updated by a layout pass: without it a sprite placed in the same
+    // batch (new, then glide) would start from where LVGL last drew it, e.g. (0, 0).
+    lv_obj_update_layout(s.obj);
     animate(lv_obj_get_x(s.obj), tx, (lv_anim_exec_xcb_t)lv_obj_set_x);
     animate(lv_obj_get_y(s.obj), ty, (lv_anim_exec_xcb_t)lv_obj_set_y);
 }
