@@ -446,7 +446,7 @@ void AppEmbodyMode::onClose()
 
 /* ---------------------------------- View ---------------------------------- */
 
-// Tap -> "screen_tap" event with coordinates; long press -> toggle the QR panel.
+// Tap -> "screen_tap" event with coordinates; long press -> "screen_long_press" (free for apps).
 // Runs in the LVGL task, so it only queues.
 void AppEmbodyMode::on_screen_event(lv_event_t* e)
 {
