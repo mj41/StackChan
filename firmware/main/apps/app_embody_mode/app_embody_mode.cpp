@@ -484,12 +484,12 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
-    // Top row: < server name (n/m) [home = default] > [x = close]
+    // Top row: < server name (n/m) [home = default] >; close (x) at the bottom right
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
     _title->setTextFont(&lv_font_montserrat_20);
     _title->setTextColor(lv_color_hex(_color_text));
-    _title->setSize(132, 24);  // fixed height: one line, long names end in "..."
+    _title->setSize(172, 24);  // fixed height: one line, long names end in "..."
     _title->setLongMode(LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(_title->get(), LV_TEXT_ALIGN_CENTER, 0);
     _title->align(LV_ALIGN_TOP_LEFT, 52, 4);
@@ -497,16 +497,17 @@ void AppEmbodyMode::create_view()
     _server_pos->setText("");
     _server_pos->setTextFont(&lv_font_montserrat_16);
     _server_pos->setTextColor(lv_color_hex(_color_muted));
-    _server_pos->setWidth(132);
+    _server_pos->setWidth(172);
     lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
     _server_pos->align(LV_ALIGN_TOP_LEFT, 52, 28);
     const char* symbols[4] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
-    const int xs[4]        = {8, 188, 232, 276};
+    const int xs[4]        = {8, 232, 276, 270};
+    const int ys[4]        = {6, 6, 6, 178};  // close: bottom right, above the home swipe zone
     const int actions[4]   = {-1, 2, 1, 3};
     for (int i = 0; i < 4; i++) {
         lv_obj_t* b = lv_button_create(_panel->get());
         lv_obj_set_size(b, 40, 36);
-        lv_obj_set_pos(b, xs[i], 6);
+        lv_obj_set_pos(b, xs[i], ys[i]);
         lv_obj_set_style_bg_color(b, lv_color_hex(0xE8EBFF), 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_set_style_radius(b, 10, 0);
@@ -561,7 +562,7 @@ void AppEmbodyMode::create_view()
     _detail = std::make_unique<Label>(*_panel);
     _detail->setTextFont(&lv_font_montserrat_16);
     _detail->setTextColor(lv_color_hex(_color_muted));
-    _detail->setWidth(128);
+    _detail->setWidth(84);  // the close button sits to its right
     _detail->setLongMode(LV_LABEL_LONG_MODE_WRAP);
     _detail->align(LV_ALIGN_TOP_LEFT, 182, 184);
     _detail->setText("");
@@ -635,7 +636,7 @@ void AppEmbodyMode::render()
     const auto& code = _client->pairCode();
     _code->setText(code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code);
     if (_client->viewers() > 0) {
-        _detail->setText("Long press to show the face");
+        _detail->setText(LV_SYMBOL_CLOSE " shows the face");
     } else {
         _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
     }
