@@ -187,7 +187,9 @@ void AppEmbodyMode::onOpen()
     _robot_id = robot_id;
     _commands = commands;
     load_servers();
-    connect_server(_server_index);
+    if (!_default_url.empty()) {
+        connect_server(_server_index);
+    }  // else: the QR screen is a chooser (Next, Connect); nothing is contacted until then
 
     _imu_connection = GetHAL().onImuMotionEvent.connect([this](ImuMotionEvent event) {
         if (event == ImuMotionEvent::Shake) {
@@ -238,13 +240,26 @@ void AppEmbodyMode::onRunning()
 {
     // Server switching: from the QR screen buttons or the server_switch command
     if (const int nav = _nav_request.exchange(0); nav && !_servers.empty()) {
-        if (nav == 2) {
-            _default_url = _servers[_server_index].url;
+        if (nav == 2) {  // Pin: make the shown server the default, or clear it if it is already
+            const auto& url = _servers[_server_index].url;
+            _default_url    = _default_url == url ? "" : url;
             save_servers();
             announce_servers();
+        } else if (nav == 3) {  // the bottom-right button: Connect while choosing, else Close
+            if (_client) {
+                _qr_hide_requested = true;
+            } else {
+                _pending_switch = (int)_server_index;
+            }
         } else if (_servers.size() > 1) {
-            _pending_switch = (int)((_server_index + _servers.size() + nav) % _servers.size());
-            _qr_pinned      = true;  // chosen on the QR screen: stay there
+            const size_t next = (_server_index + _servers.size() + nav) % _servers.size();
+            if (_client) {
+                _pending_switch = (int)next;
+                _qr_pinned      = true;  // chosen on the QR screen: stay there
+            } else {
+                _server_index = next;  // still choosing: nothing to connect yet
+                _servers_rev++;
+            }
         }
     }
     if (_pending_switch >= 0) {
@@ -485,7 +500,7 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
-    // Top row: [home = default] server name (n/m) [Next >]; close (x) at the bottom right.
+    // Top row: [Pin = default] server name (n/m) [Next >]; close (x) at the bottom right.
     // Big buttons: small icons are hard to hit on this screen.
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
@@ -502,10 +517,10 @@ void AppEmbodyMode::create_view()
     _server_pos->setWidth(160);
     lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
     _server_pos->align(LV_ALIGN_TOP_LEFT, 62, 28);
-    const char* labels[3] = {LV_SYMBOL_HOME, "Next " LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
-    const int xs[3]        = {6, 226, 262};
-    const int ys[3]        = {4, 4, 172};  // close: bottom right, above the home swipe zone
-    const int ws[3]        = {50, 88, 50};
+    const char* labels[3] = {"Pin", "Next " LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE " Close"};
+    const int xs[3]        = {6, 226, 182};
+    const int ys[3]        = {4, 4, 172};  // close (or connect): bottom right, above the home swipe zone
+    const int ws[3]        = {50, 88, 132};
     const int actions[3]   = {2, 1, 3};
     for (int i = 0; i < 3; i++) {
         lv_obj_t* b = lv_button_create(_panel->get());
@@ -553,21 +568,21 @@ void AppEmbodyMode::create_view()
     _status->setTextColor(lv_color_hex(_color_text));
     _status->setWidth(128);
     _status->setLongMode(LV_LABEL_LONG_MODE_WRAP);
-    _status->align(LV_ALIGN_TOP_LEFT, 182, 64);
+    _status->align(LV_ALIGN_TOP_LEFT, 182, 60);
     _status->setText("Connecting to server...");
 
     _code = std::make_unique<Label>(*_panel);
     _code->setTextFont(&lv_font_montserrat_20);
     _code->setTextColor(lv_color_hex(_color_text));
-    _code->align(LV_ALIGN_TOP_LEFT, 182, 154);
+    _code->align(LV_ALIGN_TOP_LEFT, 182, 104);
     _code->setText("");
 
     _detail = std::make_unique<Label>(*_panel);
     _detail->setTextFont(&lv_font_montserrat_16);
     _detail->setTextColor(lv_color_hex(_color_muted));
-    _detail->setWidth(76);  // the close button sits to its right
+    _detail->setWidth(128);
     _detail->setLongMode(LV_LABEL_LONG_MODE_WRAP);
-    _detail->align(LV_ALIGN_TOP_LEFT, 182, 184);
+    _detail->align(LV_ALIGN_TOP_LEFT, 182, 132);
     _detail->setText("");
 
     // Privacy indicator above everything while the camera or microphone streams
@@ -591,22 +606,23 @@ void AppEmbodyMode::create_view()
 
 void AppEmbodyMode::render()
 {
-    if (!_client || !_panel) {
+    if (!_panel) {
         return;
     }
 
-    // The first browser to pair switches to the face; a long press toggles the QR.
     bool changed = false;
-    // Browsers paired: show the face. Not for a mere "paired before" on reconnect while the
-    // QR screen is pinned (browsing servers there); a new scan always shows the face.
-    if (_client->viewers() > _rendered_viewers && !(_qr_pinned && _client->pairedOnReconnect())) {
-        _qr_visible = false;
-        _qr_pinned  = false;
-        changed     = true;
-        wake_screen();
+    if (_client) {
+        // Browsers paired: show the face. Not for a mere "paired before" on reconnect while
+        // the QR screen is pinned (browsing servers there); a new scan always shows the face.
+        if (_client->viewers() > _rendered_viewers && !(_qr_pinned && _client->pairedOnReconnect())) {
+            _qr_visible = false;
+            _qr_pinned  = false;
+            changed     = true;
+            wake_screen();
+        }
+        _rendered_viewers = _client->viewers();
     }
-    _rendered_viewers = _client->viewers();
-    if (_toggle_qr_requested.exchange(false) && _client->isRegistered()) {
+    if (_toggle_qr_requested.exchange(false) && (!_client || _client->isRegistered())) {
         _qr_visible = !_qr_visible;
         changed     = true;
     }
@@ -617,6 +633,24 @@ void AppEmbodyMode::render()
     }
     if (changed) {
         _panel->setHidden(!_qr_visible);
+    }
+    if (_qr_visible != _rendered_qr_visible) {  // the swipe-up bar's button goes where you are not
+        _rendered_qr_visible = _qr_visible;
+        view::set_home_indicator_extra_text(_qr_visible ? "APP" : "QR");
+    }
+
+    if (!_client) {  // no default server: choosing one, nothing contacted yet
+        if (_rendered_revision != UINT32_MAX - 1) {
+            _rendered_revision = UINT32_MAX - 1;
+            _rendered_url.clear();
+            _status->setText("Not connected");
+            lv_obj_add_flag(_qr, LV_OBJ_FLAG_HIDDEN);
+            _qr_hint->setText("Pick a server");
+            _qr_hint->setHidden(false);
+            _code->setText("");
+            _detail->setText("Next, then Connect");
+        }
+        return;
     }
 
     if (_client->revision() == _rendered_revision) {
@@ -631,6 +665,7 @@ void AppEmbodyMode::render()
         _rendered_url = url;
         if (url.empty()) {
             lv_obj_add_flag(_qr, LV_OBJ_FLAG_HIDDEN);
+            _qr_hint->setText("No code yet");
             _qr_hint->setHidden(false);
         } else {
             lv_qrcode_update(_qr, url.data(), url.size());
@@ -643,7 +678,7 @@ void AppEmbodyMode::render()
     const auto& code = _client->pairCode();
     _code->setText(code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code);
     if (_client->viewers() > 0) {
-        _detail->setText(LV_SYMBOL_CLOSE " shows the face");
+        _detail->setText("Close: back to the app");
     } else {
         _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
     }
@@ -922,9 +957,11 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         announce_servers();
     } else if (command == "server_default") {
-        const int i = find_server(args["server"] | "");
-        if (i >= 0) {
-            _default_url = _servers[i].url;
+        // {"server": url or name}; "" clears it (the robot then asks at start)
+        const std::string key = args["server"] | "";
+        const int i           = find_server(key);
+        if (i >= 0 || key.empty()) {
+            _default_url = i >= 0 ? _servers[i].url : "";
             save_servers();
         }
         announce_servers();
@@ -1768,7 +1805,7 @@ void AppEmbodyMode::load_servers()
             }
         }
     }
-    _default_url      = settings.GetString("default", _servers[0].url);
+    _default_url      = settings.GetString("default", _servers[0].url);  // "" = none: choose at start
     const int def     = find_server(_default_url);
     _server_index     = def < 0 ? 0 : def;
     _servers_rev++;
@@ -1859,6 +1896,7 @@ void AppEmbodyMode::render_server_row()
     _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _server_index + 1, _servers.size()) : "");
     const bool is_default = e.url == _default_url;
     lv_obj_set_style_bg_color(_server_buttons[0], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
+    lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), _client ? LV_SYMBOL_CLOSE " Close" : "Connect");
     // Next only when there is somewhere to go
     _servers.size() > 1 ? lv_obj_remove_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN)
                         : lv_obj_add_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN);
@@ -1869,11 +1907,7 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
 {
     auto* self       = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
     const int action = (int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
-    if (action == 3) {
-        self->_qr_hide_requested = true;  // close: back to the face
-    } else {
-        self->_nav_request = action;
-    }
+    self->_nav_request = action;
 }
 
 // (Re)connects to _servers[index]: a fresh client with that URL and token.

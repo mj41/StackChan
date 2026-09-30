@@ -201,6 +201,13 @@ public:
         _extra->setPos(0, _pos_y_anim.directValue());
     }
 
+    void setExtraText(const char* text)
+    {
+        if (_extra_label) {
+            _extra_label->setText(text);
+        }
+    }
+
     bool isExtraClicked()
     {
         if (_extra_clicked) {
@@ -241,6 +248,11 @@ public:
     {
         onExtra = onClick;
         _home_button->addExtra(text);
+    }
+
+    void setExtraText(const char* text)
+    {
+        _home_button->setExtraText(text);
     }
 
     void init(lv_obj_t* parent, uint32_t colorButton, uint32_t colorBorder)
@@ -333,6 +345,13 @@ void set_home_indicator_extra_button(const char* text, std::function<void(void)>
 {
     if (_home_indicator) {
         _home_indicator->setExtra(text, onClick);
+    }
+}
+
+void set_home_indicator_extra_text(const char* text)
+{
+    if (_home_indicator) {
+        _home_indicator->setExtraText(text);
     }
 }
 

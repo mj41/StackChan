@@ -9,7 +9,7 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
    - **Long press:** reported as `screen_long_press {x, y}` (free for apps).
-   - **QR button:** swipe up from the bottom: next to Home, **QR** shows or hides the pairing screen (so another viewer can pair, or to switch servers).
+   - **QR button:** swipe up from the bottom: next to Home, **QR** opens the pairing screen (so another viewer can pair, or to switch servers); there it reads **APP** and goes back.
    - **Double tap:** blanks the screen (manual screensaver).
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
 5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. A "touch" below means the screen, a head press or swipe, or a new NFC tag. There are two kinds:
@@ -26,7 +26,8 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
 
 The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
-- **On the robot:** the QR screen's top row is `⌂ name n/m [Next ▶]`, and ✕ at the bottom right closes it. **Next** switches to the next server (the robot reconnects and shows that server's QR, and the QR screen stays open), ⌂ makes the shown one the **default**, used at start.
+- **On the robot:** the QR screen's top row is `Pin  name n/m  Next ▶`, with a wide `✕ Close` at the bottom right. **Next** switches to the next server (the robot reconnects and shows that server's QR; the QR screen stays open), **Pin** makes the shown one the **default** used at start (blue), and tapping Pin on the default **unpins** it. With no default, Embody Mode starts as a **chooser**: it contacts nothing, Next browses, and the bottom-right button reads **Connect**.
+- **Swipe-up bar:** next to Home, **QR** opens the QR screen; while it is open the button reads **APP** and goes back to the app.
 - **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
 
 ## Configuration
