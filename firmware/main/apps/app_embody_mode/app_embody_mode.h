@@ -67,17 +67,18 @@ private:
         std::string name, url, token, origin;  // origin: built-in, offered, added
     };
     std::vector<ServerEntry> _servers;
-    size_t _server_index = 0;
+    size_t _server_index = 0;  // the server the client talks to
+    size_t _shown_index  = 0;  // the server shown on the QR screen: Next browses, Connect switches
     std::string _default_url;
     std::string _robot_id;
     std::vector<std::string> _commands;
     bool _servers_announced = false;
     int _pending_switch     = -1;                // from server_switch, done at the top of the loop
-    std::atomic<int> _nav_request{0};            // from the QR screen: -1 prev, +1 next, 2 make default
+    std::atomic<int> _nav_request{0};            // from the QR screen: +1 next, 2 pin, 3 connect/close
     lv_obj_t* _server_buttons[3] = {};           // default (home), next, close
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
-    bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text  // switched servers on the QR screen: keep it until closed or a new scan
+    bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;
     bool _network_started = false;

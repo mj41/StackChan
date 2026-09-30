@@ -241,25 +241,21 @@ void AppEmbodyMode::onRunning()
     // Server switching: from the QR screen buttons or the server_switch command
     if (const int nav = _nav_request.exchange(0); nav && !_servers.empty()) {
         if (nav == 2) {  // Pin: make the shown server the default, or clear it if it is already
-            const auto& url = _servers[_server_index].url;
+            const auto& url = _servers[_shown_index].url;
             _default_url    = _default_url == url ? "" : url;
             save_servers();
             announce_servers();
-        } else if (nav == 3) {  // the bottom-right button: Connect while choosing, else Close
-            if (_client) {
+            _servers_rev++;
+        } else if (nav == 3) {  // the bottom-right button: Close on the current server, else Connect
+            if (_client && _shown_index == _server_index) {
                 _qr_hide_requested = true;
             } else {
-                _pending_switch = (int)_server_index;
+                _pending_switch = (int)_shown_index;
+                _qr_pinned      = true;  // chosen on the QR screen: stay there for its code
             }
-        } else if (_servers.size() > 1) {
-            const size_t next = (_server_index + _servers.size() + nav) % _servers.size();
-            if (_client) {
-                _pending_switch = (int)next;
-                _qr_pinned      = true;  // chosen on the QR screen: stay there
-            } else {
-                _server_index = next;  // still choosing: nothing to connect yet
-                _servers_rev++;
-            }
+        } else if (_servers.size() > 1) {  // Next: only browse, the connection stays
+            _shown_index = (_shown_index + 1) % _servers.size();
+            _servers_rev++;
         }
     }
     if (_pending_switch >= 0) {
@@ -643,16 +639,18 @@ void AppEmbodyMode::render()
         view::set_home_indicator_extra_text(_qr_visible ? "APP" : "QR");
     }
 
-    if (!_client) {  // no default server: choosing one, nothing contacted yet
+    // Browsing: the shown server is not the connected one (or nothing is connected yet,
+    // with no default server). Its code comes only after Connect.
+    if (!_client || _shown_index != _server_index) {
         if (_rendered_revision != UINT32_MAX - 1) {
             _rendered_revision = UINT32_MAX - 1;
             _rendered_url.clear();
-            _status->setText("No server pinned");
+            _status->setText(_client ? "On " + _servers[_server_index].name : "No server pinned");
             lv_obj_add_flag(_qr, LV_OBJ_FLAG_HIDDEN);
             _qr_hint->setText("Not connected");
             _qr_hint->setHidden(false);
             _code->setText("");
-            _detail->setText("Next to choose, Connect to start");
+            _detail->setText(_client ? "Connect to switch" : "Next to choose, Connect to start");
         }
         return;
     }
@@ -953,6 +951,8 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
             if ((size_t)i < _server_index) {
                 _server_index--;
             }
+            _shown_index = _server_index;
+            _servers_rev++;
             save_servers();
         }
         announce_servers();
@@ -1808,6 +1808,7 @@ void AppEmbodyMode::load_servers()
     _default_url      = settings.GetString("default", _servers[0].url);  // "" = none: choose at start
     const int def     = find_server(_default_url);
     _server_index     = def < 0 ? 0 : def;
+    _shown_index      = _server_index;
     _servers_rev++;
 }
 
@@ -1891,12 +1892,17 @@ void AppEmbodyMode::render_server_row()
         return;
     }
     _rendered_servers_rev = _servers_rev;
-    const auto& e         = _servers[_server_index];
+    _shown_index          = std::min(_shown_index, _servers.size() - 1);
+    const auto& e         = _servers[_shown_index];
+    const bool is_current = _client && _shown_index == _server_index;
     _title->setText(e.name);
-    _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _server_index + 1, _servers.size()) : "");
+    _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _shown_index + 1, _servers.size()) : "");
     const bool is_default = e.url == _default_url;
     lv_obj_set_style_bg_color(_server_buttons[0], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
-    lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), _client ? LV_SYMBOL_CLOSE " Close" : "Connect");
+    lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), is_current ? LV_SYMBOL_CLOSE " Close" : "Connect");
+    // The connect button stands out while it would switch servers
+    lv_obj_set_style_bg_color(_server_buttons[2], lv_color_hex(is_current ? 0xE8EBFF : _color_theme), 0);
+    _rendered_revision = UINT32_MAX;  // the QR side follows the shown server
     // Next only when there is somewhere to go
     _servers.size() > 1 ? lv_obj_remove_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN)
                         : lv_obj_add_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN);
@@ -1915,6 +1921,7 @@ void AppEmbodyMode::connect_server(size_t index)
 {
     index         = std::min(index, _servers.size() - 1);
     _server_index = index;
+    _shown_index  = index;
     if (_client) {
         // Closing a TLS socket can block for up to 10 s (esp-ml307 waits for its receive
         // task), so the old client is destroyed in a task of its own, not in the app loop.
