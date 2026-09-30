@@ -677,11 +677,7 @@ void AppEmbodyMode::render()
     // Show the code in two groups of four so it is easy to read out
     const auto& code = _client->pairCode();
     _code->setText(code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code);
-    if (_client->viewers() > 0) {
-        _detail->setText("Close: back to the app");
-    } else {
-        _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
-    }
+    _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
 }
 
 // Sensor values for the 2 s telemetry. Runs in the app loop, which also drives
