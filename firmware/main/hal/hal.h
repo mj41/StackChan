@@ -22,10 +22,15 @@
  */
 enum class HeadPetGesture { None, Press, Release, SwipeForward, SwipeBackward };
 
-// Latest BMI270 sample: acceleration in m/s^2, rotation rate in degrees/s.
+// Latest BMI270 sample: acceleration in m/s^2, rotation rate in degrees/s, and
+// the BMM150 magnetic field (uT, compensated; raw counts and hall value too).
 struct ImuSample_t {
-    float accel[3] = {};
-    float gyro[3]  = {};
+    float accel[3]     = {};
+    float gyro[3]      = {};
+    bool mag_valid     = false;
+    float mag[3]       = {};
+    int16_t mag_raw[3] = {};
+    uint16_t mag_rhall = 0;
 };
 
 // One SCS servo's feedback registers.

@@ -17,6 +17,11 @@ struct BMI270_Data {
     float gyro_x;
     float gyro_y;
     float gyro_z;
+    // BMM150 magnetometer behind the BMI270's AUX interface (after beginMagnetometer())
+    bool mag_valid = false;
+    int16_t mag_raw_x = 0, mag_raw_y = 0, mag_raw_z = 0;  // counts (13, 13, 15 bit)
+    uint16_t mag_rhall = 0;                                // hall resistance, for compensation
+    float mag_x = 0, mag_y = 0, mag_z = 0;                 // uT, compensated with the factory trim
 };
 
 class BMI270 {
@@ -42,6 +47,10 @@ public:
      */
     bool update();
 
+    // Starts the BMM150 magnetometer (CoreS3: on the BMI270's AUX I2C at 0x10) and
+    // switches the BMI270 to reading it automatically. Call after begin().
+    bool beginMagnetometer();
+
     void getAccelerometer(float& x, float& y, float& z);
     void getGyroscope(float& x, float& y, float& z);
     const BMI270_Data& getData();
@@ -57,6 +66,16 @@ private:
     static BMI2_INTF_RETURN_TYPE bmi2_i2c_write(uint8_t reg_addr, const uint8_t* reg_data, uint32_t len,
                                                 void* intf_ptr);
     static void bmi2_delay_us(uint32_t period, void* intf_ptr);
+
+    // BMM150 factory trim (Bosch BMM150 API names)
+    struct MagTrim {
+        int8_t x1 = 0, y1 = 0, x2 = 0, y2 = 0, xy2 = 0;
+        uint8_t xy1 = 0;
+        int16_t z2 = 0, z3 = 0, z4 = 0;
+        uint16_t z1 = 0, xyz1 = 0;
+    } _mag_trim;
+    bool _mag_ok = false;
+    void decode_mag(const uint8_t* aux);
 
     float lsb_to_mps2(int16_t val, float g_range, uint8_t bit_width);
     float lsb_to_dps(int16_t val, float dps, uint8_t bit_width);

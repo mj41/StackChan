@@ -174,7 +174,8 @@ void AppEmbodyMode::onOpen()
                          "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
                          "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
                          "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
-                         "hold_s", "usb_data"},
+                         "hold_s", "usb_data", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
+                         "mag_raw_z", "mag_rhall"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -591,6 +592,15 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         t.emplace_back("imu_ay_g", round_to(imu.accel[1] / g, 0.01f));
         t.emplace_back("imu_az_g", round_to(imu.accel[2] / g, 0.01f));
         t.emplace_back("imu_gyro_dps", round_to(std::hypot(imu.gyro[0], imu.gyro[1], imu.gyro[2]), 0.1f));
+        if (imu.mag_valid) {  // BMM150: compensated uT, and the raw counts
+            t.emplace_back("mag_x_ut", round_to(imu.mag[0], 0.1f));
+            t.emplace_back("mag_y_ut", round_to(imu.mag[1], 0.1f));
+            t.emplace_back("mag_z_ut", round_to(imu.mag[2], 0.1f));
+            t.emplace_back("mag_raw_x", (float)imu.mag_raw[0]);
+            t.emplace_back("mag_raw_y", (float)imu.mag_raw[1]);
+            t.emplace_back("mag_raw_z", (float)imu.mag_raw[2]);
+            t.emplace_back("mag_rhall", (float)imu.mag_rhall);
+        }
     }
 
     ServoStatus_t servo;

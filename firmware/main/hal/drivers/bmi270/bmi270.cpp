@@ -153,6 +153,10 @@ bool BMI270::update()
         _data.gyro_y = lsb_to_dps(sens_data.gyr.y, 2000.0f, 16);
         _data.gyro_z = lsb_to_dps(sens_data.gyr.z, 2000.0f, 16);
 
+        if (_mag_ok) {
+            decode_mag(sens_data.aux_data);
+        }
+
         return true;
     }
     return false;
@@ -187,4 +191,117 @@ float BMI270::lsb_to_dps(int16_t val, float dps, uint8_t bit_width)
 {
     float half_scale = (float)(1 << (bit_width - 1));
     return (dps * val) / half_scale;
+}
+
+/* ------------------------------ BMM150 (AUX) ------------------------------ */
+
+namespace {
+constexpr uint8_t BMM150_ADDR          = 0x10;
+constexpr uint8_t BMM150_CHIP_ID_REG   = 0x40;  // 0x32
+constexpr uint8_t BMM150_DATA_X_LSB    = 0x42;  // X, Y, Z, RHALL: 8 bytes
+constexpr uint8_t BMM150_POWER_CTRL    = 0x4B;
+constexpr uint8_t BMM150_OP_MODE       = 0x4C;  // bits 5:3 ODR (000 = 10 Hz), 2:1 mode (00 normal)
+constexpr uint8_t BMM150_REP_XY        = 0x51;
+constexpr uint8_t BMM150_REP_Z         = 0x52;
+constexpr uint8_t BMM150_TRIM_X1       = 0x5D;  // trim block 0x5D..0x71
+}  // namespace
+
+bool BMI270::beginMagnetometer()
+{
+    if (!_initialized) {
+        return false;
+    }
+    // AUX interface in manual mode, to set up the BMM150
+    struct bmi2_sens_config config;
+    config.type = BMI2_AUX;
+    int8_t rslt = bmi2_get_sensor_config(&config, 1, &_bmi);
+    config.cfg.aux.aux_en          = BMI2_ENABLE;
+    config.cfg.aux.manual_en       = BMI2_ENABLE;
+    config.cfg.aux.fcu_write_en    = BMI2_ENABLE;
+    config.cfg.aux.man_rd_burst    = BMI2_AUX_READ_LEN_3;  // 8 bytes
+    config.cfg.aux.aux_rd_burst    = BMI2_AUX_READ_LEN_3;
+    config.cfg.aux.odr             = BMI2_AUX_ODR_25HZ;
+    config.cfg.aux.offset          = 0;
+    config.cfg.aux.i2c_device_addr = BMM150_ADDR;
+    config.cfg.aux.read_addr       = BMM150_DATA_X_LSB;
+    uint8_t sensors[3]             = {BMI2_ACCEL, BMI2_GYRO, BMI2_AUX};
+    if (rslt != BMI2_OK || bmi2_set_sensor_config(&config, 1, &_bmi) != BMI2_OK ||
+        bmi2_sensor_enable(sensors, 3, &_bmi) != BMI2_OK) {
+        ESP_LOGW(TAG, "AUX setup failed");
+        return false;
+    }
+
+    const uint8_t power_on = 0x01;
+    bmi2_write_aux_man_mode(BMM150_POWER_CTRL, &power_on, 1, &_bmi);
+    vTaskDelay(pdMS_TO_TICKS(10));  // start-up time 3 ms
+    uint8_t id = 0;
+    if (bmi2_read_aux_man_mode(BMM150_CHIP_ID_REG, &id, 1, &_bmi) != BMI2_OK || id != 0x32) {
+        ESP_LOGW(TAG, "BMM150 not found (chip id 0x%02x)", id);
+        return false;
+    }
+    // Regular preset: 9 XY and 15 Z repetitions, normal mode at 10 Hz
+    const uint8_t rep_xy = 0x04, rep_z = 0x0E, op_mode = 0x00;
+    bmi2_write_aux_man_mode(BMM150_REP_XY, &rep_xy, 1, &_bmi);
+    bmi2_write_aux_man_mode(BMM150_REP_Z, &rep_z, 1, &_bmi);
+    bmi2_write_aux_man_mode(BMM150_OP_MODE, &op_mode, 1, &_bmi);
+
+    uint8_t t[21] = {};  // 0x5D..0x71
+    if (bmi2_read_aux_man_mode(BMM150_TRIM_X1, t, sizeof(t), &_bmi) != BMI2_OK) {
+        ESP_LOGW(TAG, "BMM150 trim read failed");
+        return false;
+    }
+    auto u16 = [&](int i) { return (uint16_t)(t[i] | (t[i + 1] << 8)); };
+    _mag_trim.x1   = (int8_t)t[0];                   // 0x5D
+    _mag_trim.y1   = (int8_t)t[1];                   // 0x5E
+    _mag_trim.z4   = (int16_t)u16(0x62 - 0x5D);
+    _mag_trim.x2   = (int8_t)t[0x64 - 0x5D];
+    _mag_trim.y2   = (int8_t)t[0x65 - 0x5D];
+    _mag_trim.z2   = (int16_t)u16(0x68 - 0x5D);
+    _mag_trim.z1   = u16(0x6A - 0x5D);
+    _mag_trim.xyz1 = u16(0x6C - 0x5D) & 0x7FFF;
+    _mag_trim.z3   = (int16_t)u16(0x6E - 0x5D);
+    _mag_trim.xy2  = (int8_t)t[0x70 - 0x5D];
+    _mag_trim.xy1  = t[0x71 - 0x5D];
+
+    // Data mode: the BMI270 now reads 0x42..0x49 by itself into its AUX data registers
+    config.cfg.aux.manual_en = BMI2_DISABLE;
+    if (bmi2_set_sensor_config(&config, 1, &_bmi) != BMI2_OK) {
+        ESP_LOGW(TAG, "AUX data mode failed");
+        return false;
+    }
+    _mag_ok = true;
+    ESP_LOGI(TAG, "BMM150 magnetometer ok");
+    return true;
+}
+
+// Raw fields per the BMM150 datasheet, compensated with Bosch's floating-point formulas.
+void BMI270::decode_mag(const uint8_t* a)
+{
+    const int16_t x = (int16_t)(a[0] | (a[1] << 8)) >> 3;  // 13 bit
+    const int16_t y = (int16_t)(a[2] | (a[3] << 8)) >> 3;  // 13 bit
+    const int16_t z = (int16_t)(a[4] | (a[5] << 8)) >> 1;  // 15 bit
+    const uint16_t rhall = (uint16_t)(a[6] | (a[7] << 8)) >> 2;
+    _data.mag_raw_x = x;
+    _data.mag_raw_y = y;
+    _data.mag_raw_z = z;
+    _data.mag_rhall = rhall;
+    const auto& tr  = _mag_trim;
+    if (rhall == 0 || tr.xyz1 == 0 || x == -4096 || y == -4096 || z == -16384) {
+        _data.mag_valid = false;  // overflow or no data yet
+        return;
+    }
+    const float r0 = (float)tr.xyz1 * 16384.0f / rhall - 16384.0f;
+    auto xy = [&](int16_t v, int8_t d1, int8_t d2) {
+        const float p2 = (float)tr.xy2 * (r0 * r0 / 268435456.0f);
+        const float p3 = p2 + r0 * (float)tr.xy1 / 16384.0f;
+        const float p5 = v * ((p3 + 256.0f) * ((float)d2 + 160.0f));
+        return (p5 / 8192.0f + (float)d1 * 8.0f) / 16.0f;
+    };
+    _data.mag_x = xy(x, tr.x1, tr.x2);
+    _data.mag_y = xy(y, tr.y1, tr.y2);
+    const float z0  = (float)z - (float)tr.z4;
+    const float z2  = (float)tr.z3 * ((float)rhall - (float)tr.xyz1);
+    const float z4  = (float)tr.z2 + (float)tr.z1 * (float)rhall / 32768.0f;
+    _data.mag_z     = ((z0 * 131072.0f - z2) / (z4 * 4.0f)) / 16.0f;
+    _data.mag_valid = true;
 }

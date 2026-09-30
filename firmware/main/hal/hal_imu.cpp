@@ -28,7 +28,12 @@ static void _imu_task(void* param)
             auto& data = _bmi270->getData();
             {
                 std::lock_guard<std::mutex> lock(_sample_mutex);
-                _sample     = {{data.accel_x, data.accel_y, data.accel_z}, {data.gyro_x, data.gyro_y, data.gyro_z}};
+                _sample = {{data.accel_x, data.accel_y, data.accel_z},
+                           {data.gyro_x, data.gyro_y, data.gyro_z},
+                           data.mag_valid,
+                           {data.mag_x, data.mag_y, data.mag_z},
+                           {data.mag_raw_x, data.mag_raw_y, data.mag_raw_z},
+                           data.mag_rhall};
                 _has_sample = true;
             }
             // mclog::debug("IMU Accel: {:.2f}\t{:.2f}\t{:.2f}", data.accel_x, data.accel_y, data.accel_z);
@@ -61,6 +66,9 @@ void Hal::imu_init()
         return;
     }
     mclog::tagInfo(_tag, "BMI270 init ok");
+    if (!_bmi270->beginMagnetometer()) {
+        mclog::tagWarn(_tag, "BMM150 magnetometer not available");
+    }
 
     // xTaskCreateWithCaps(_imu_task, "imu", 4096, NULL, 2, NULL, MALLOC_CAP_SPIRAM);
     xTaskCreatePinnedToCoreWithCaps(_imu_task, "imu", 4096, NULL, 2, NULL, 1, MALLOC_CAP_SPIRAM);
