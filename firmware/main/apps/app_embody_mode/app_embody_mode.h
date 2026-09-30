@@ -59,6 +59,24 @@ public:
 
 private:
     std::unique_ptr<embody::Client> _client;
+
+    // Servers the robot can use: the built-in one (Kconfig), ones servers offered
+    // (ServerOffer) and ones added from a browser. Stored in NVS ("embody"). The QR
+    // screen switches between them; the default one is used at start.
+    struct ServerEntry {
+        std::string name, url, token, origin;  // origin: built-in, offered, added
+    };
+    std::vector<ServerEntry> _servers;
+    size_t _server_index = 0;
+    std::string _default_url;
+    std::string _robot_id;
+    std::vector<std::string> _commands;
+    bool _servers_announced = false;
+    int _pending_switch     = -1;                // from server_switch, done at the top of the loop
+    std::atomic<int> _nav_request{0};            // from the QR screen: -1 prev, +1 next, 2 make default
+    lv_obj_t* _server_buttons[3] = {};           // prev, default, next
+    uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
+    uint32_t _rendered_servers_rev = UINT32_MAX;
     bool _network_started = false;
 
     // QR panel, shown over the face until a browser pairs
@@ -242,6 +260,14 @@ private:
     void update_light();
     void update_ir();
     void update_power_events();
+    void load_servers();
+    void save_servers();
+    void connect_server(size_t index);
+    void merge_offers(const std::string& serversJson);
+    void announce_servers();
+    void render_server_row();
+    int find_server(const std::string& key);
+    static void on_server_nav(lv_event_t* e);
     void send_imu_stream();
     void start_rotate(int velocity, int seconds, bool noHeadCable);
     void stop_rotate();

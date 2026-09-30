@@ -94,6 +94,7 @@ private:
 class HomeButton {
 public:
     HomeButton(lv_obj_t* parent, uint32_t colorButton, uint32_t colorBorder)
+        : _color_button(colorButton), _color_border(colorBorder)
     {
         _bg_mask = std::make_unique<Container>(parent);
         _bg_mask->align(LV_ALIGN_CENTER, 0, 0);
@@ -138,6 +139,9 @@ public:
         _pos_y_anim.update();
         if (!_pos_y_anim.done()) {
             _btn->setPos(0, _pos_y_anim.directValue());
+            if (_extra) {
+                _extra->setPos(0, _pos_y_anim.directValue());
+            }
         } else {
             if (_hide_mask_flag) {
                 _hide_mask_flag = false;
@@ -175,6 +179,37 @@ public:
         return false;
     }
 
+    // A smaller text button right of Home (x 246..316), sliding with it.
+    void addExtra(const char* text)
+    {
+        _extra = std::make_unique<Button>(_bg_mask->get());
+        _extra->setSize(70, 73);
+        _extra->setAlign(LV_ALIGN_BOTTOM_MID);
+        _extra->setBgColor(lv_color_hex(_color_button));
+        _extra->setBorderWidth(2);
+        _extra->setBorderColor(lv_color_hex(_color_border));
+        _extra->setShadowWidth(0);
+        _extra->setRadius(18);
+        _extra->addFlag(LV_OBJ_FLAG_FLOATING);
+        lv_obj_set_style_translate_x(_extra->get(), 121, 0);
+        _extra->onClick().connect([&]() { _extra_clicked = true; });
+        _extra_label = std::make_unique<Label>(_extra->get());
+        _extra_label->setText(text);
+        _extra_label->setTextFont(&lv_font_montserrat_20);
+        _extra_label->setTextColor(lv_color_hex(_color_border));
+        _extra_label->align(LV_ALIGN_CENTER, 0, -10);
+        _extra->setPos(0, _pos_y_anim.directValue());
+    }
+
+    bool isExtraClicked()
+    {
+        if (_extra_clicked) {
+            _extra_clicked = false;
+            return true;
+        }
+        return false;
+    }
+
 private:
     const int _pos_y_show = 22;
     const int _pos_y_hide = 75;
@@ -187,6 +222,10 @@ private:
     bool _is_clicked     = false;
     bool _hide_mask_flag = false;
     lv_image_dsc_t _icon_home;
+    uint32_t _color_button = 0, _color_border = 0;
+    std::unique_ptr<Button> _extra;
+    std::unique_ptr<Label> _extra_label;
+    bool _extra_clicked = false;
 };
 
 /**
@@ -196,6 +235,13 @@ private:
 class HomeIndicator {
 public:
     std::function<void(void)> onGoHome;
+    std::function<void(void)> onExtra;
+
+    void setExtra(const char* text, std::function<void(void)> onClick)
+    {
+        onExtra = onClick;
+        _home_button->addExtra(text);
+    }
 
     void init(lv_obj_t* parent, uint32_t colorButton, uint32_t colorBorder)
     {
@@ -246,6 +292,12 @@ private:
                 onGoHome();
             }
         }
+        if (_home_button->isExtraClicked()) {
+            _home_button->hide();
+            if (onExtra) {
+                onExtra();
+            }
+        }
     }
 };
 
@@ -275,6 +327,13 @@ void update_home_indicator()
 bool is_home_indicator_created()
 {
     return _home_indicator != nullptr;
+}
+
+void set_home_indicator_extra_button(const char* text, std::function<void(void)> onClick)
+{
+    if (_home_indicator) {
+        _home_indicator->setExtra(text, onClick);
+    }
 }
 
 void destroy_home_indicator()

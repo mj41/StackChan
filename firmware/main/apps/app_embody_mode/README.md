@@ -8,7 +8,8 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
 2. **QR code:** the screen shows the server's one-time pairing URL as a QR code, next to its 8-character code.
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
-   - **Long press:** toggles the QR code, so another viewer can pair.
+   - **Long press:** reported as `screen_long_press {x, y}` (free for apps).
+   - **QR button:** swipe up from the bottom: next to Home, **QR** shows or hides the pairing screen (so another viewer can pair, or to switch servers).
    - **Double tap:** blanks the screen (manual screensaver).
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
 5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. A "touch" below means the screen, a head press or swipe, or a new NFC tag. There are two kinds:
@@ -20,6 +21,13 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
    - **Coming back:** when the time is up, or immediately on a touch (screen or head), it restores the brightness and reconnects, then sends `standby_end {touched}`.
    - **Events:** any events raised while offline wait and go out after reconnecting.
 7. **Closing:** swiping up closes the app and warm-reboots to the launcher. Wi-Fi can't be stopped cleanly, which is the same reason AVATAR reboots.
+
+## Servers
+
+The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
+
+- **On the robot:** the QR screen's top row is `◀ name n/m ⌂ ▶`. The arrows switch server (the robot reconnects and shows that server's QR), ⌂ makes the shown one the **default**, used at start.
+- **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
 
 ## Configuration
 

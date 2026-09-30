@@ -16,6 +16,7 @@
 #include <smooth_lvgl.hpp>
 #include <wifi_manager.h>
 #include <board.h>
+#include <settings.h>
 #include <audio_codec.h>
 #include <lvgl_image.h>
 #include <jpg/image_to_jpeg.h>
@@ -39,6 +40,14 @@ using namespace smooth_ui_toolkit::lvgl_cpp;
 using namespace stackchan;
 
 static const char* _tag = "Embody Mode";
+
+// "wss://chan.w42.eu/x" -> "chan.w42.eu": the default name of a server entry
+static std::string host_of(const std::string& url)
+{
+    auto start = url.find("://");
+    start      = start == std::string::npos ? 0 : start + 3;
+    return url.substr(start, url.find_first_of(":/", start) - start);
+}
 
 // Launcher index of this app (see requestWarmReboot in the other apps).
 static constexpr int _launcher_index = 0;
@@ -166,63 +175,19 @@ void AppEmbodyMode::onOpen()
     commands.push_back("touch_stream");
     commands.push_back("servo_power");
     commands.push_back("rotate");
+    for (const char* c : {"server_add", "server_remove", "server_default", "server_switch"}) {
+        commands.push_back(c);
+    }
     if (hal_bridge::board_get_camera()) {
         commands.push_back("snapshot");
         commands.push_back("camera_config");
         commands.push_back("camera_reg");
     }
 
-    _client = std::make_unique<embody::Client>(embody::Client::Config{
-        .serverUrl = server_url,
-        .token     = CONFIG_STACKCHAN_EMBODY_TOKEN,
-        .robotId   = robot_id,
-        .model     = "stackchan-cores3",
-        .firmware  = esp_app_get_description()->version,
-        .commands  = commands,
-        .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
-                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
-                         "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
-                         "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
-                         "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
-                         "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
-                         "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
-                         "hold_s", "usb_data", "yaw_pos_raw", "yaw_speed_raw", "yaw_current_raw", "yaw_moving",
-                         "pitch_voltage_v", "pitch_pos_raw", "pitch_speed_raw", "pitch_current_raw", "pitch_moving",
-                         "head_zone0", "head_zone1", "head_zone2", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
-                         "mag_raw_z", "mag_rhall", "light_ch0", "light_ch1", "rtc_unix", "system_unix", "pmic_ts_raw",
-                         "servo_power", "rotate_s"},
-    });
-    _client->onCommand = [this](const std::string& command, const std::string& args) {
-        _pending_commands.emplace_back(command, args);
-    };
-    _client->onBinary = [this](uint8_t type, const std::string& payload) {
-        if (type == _bin_show_jpeg) {
-            _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock
-        } else if (type == _bin_speaker_pcm) {
-            queue_speaker_audio(payload);
-        }
-    };
-    _client->collectTelemetry = [this]() {
-        auto& motion = GetStackChan().motion();
-        embody::Client::Telemetry t{
-            {"battery_pct", (float)GetHAL().getBatteryLevel()},
-            {"charging", GetHAL().isBatteryCharging() ? 1.0f : 0.0f},
-            {"head_yaw_deg", motion.getCurrentYawAngle() / 10.0f},
-            {"head_pitch_deg", motion.getCurrentPitchAngle() / 10.0f},
-            {"wifi_rssi_dbm", (float)WifiManager::GetInstance().GetRssi()},
-            {"free_heap_kb", (float)(esp_get_free_heap_size() / 1024)},
-            {"uptime_s", (float)(esp_timer_get_time() / 1000000)},
-            {"brightness_pct", (float)GetHAL().getBackLightBrightness()},
-            {"volume_pct", (float)GetHAL().getSpeakerVolume()},
-            {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
-            {"hold_s", _hold_until ? (float)(((int32_t)(_hold_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
-            {"rotate_s", _rotate_until ? (float)(((int32_t)(_rotate_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
-            {"servo_power", _servo_power ? 1.0 : 0.0},
-            {"system_unix", (double)time(nullptr)},
-        };
-        add_sensor_telemetry(t);
-        return t;
-    };
+    _robot_id = robot_id;
+    _commands = commands;
+    load_servers();
+    connect_server(_server_index);
 
     _imu_connection = GetHAL().onImuMotionEvent.connect([this](ImuMotionEvent event) {
         if (event == ImuMotionEvent::Shake) {
@@ -271,9 +236,30 @@ void AppEmbodyMode::onOpen()
 
 void AppEmbodyMode::onRunning()
 {
+    // Server switching: from the QR screen buttons or the server_switch command
+    if (const int nav = _nav_request.exchange(0); nav && !_servers.empty()) {
+        if (nav == 2) {
+            _default_url = _servers[_server_index].url;
+            save_servers();
+            announce_servers();
+        } else if (_servers.size() > 1) {
+            _pending_switch = (int)((_server_index + _servers.size() + nav) % _servers.size());
+        }
+    }
+    if (_pending_switch >= 0) {
+        const size_t target = (size_t)_pending_switch;
+        _pending_switch     = -1;
+        connect_server(target);
+        _servers_rev++;
+    }
+
     // Network I/O, JPEG work and camera capture happen outside the LVGL lock.
     if (_client) {
         _client->update();
+        if (_client->isRegistered() && !_servers_announced) {
+            _servers_announced = true;
+            announce_servers();
+        }
 
         // Using the robot remotely keeps the screensaver away: commands (even ping) and live media.
         if (_client->commandCount() != _seen_commands) {
@@ -352,6 +338,7 @@ void AppEmbodyMode::onRunning()
         _speaking_until = now + 800;
     }
 
+    render_server_row();
     update_motion();
     update_hold();
     if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
@@ -429,6 +416,10 @@ void AppEmbodyMode::onClose()
     _rendered_revision = UINT32_MAX;
     _rendered_url.clear();
     _qr_visible = true;
+    _rendered_servers_rev = UINT32_MAX;  // the row's buttons went with the panel
+    for (auto& b : _server_buttons) {
+        b = nullptr;
+    }
 
     // Wi-Fi can't be torn down cleanly; reboot back to the launcher like AVATAR does.
     if (_network_started) {
@@ -444,8 +435,12 @@ void AppEmbodyMode::on_screen_event(lv_event_t* e)
 {
     auto* self = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
     auto code  = lv_event_get_code(e);
-    if (code == LV_EVENT_LONG_PRESSED) {
-        self->_toggle_qr_requested = true;
+    if (code == LV_EVENT_LONG_PRESSED) {  // free for apps (the QR screen has its own button)
+        lv_point_t p{};
+        if (auto* indev = lv_indev_active()) {
+            lv_indev_get_point(indev, &p);
+        }
+        self->queue_event("screen_long_press", {{"x", (float)p.x}, {"y", (float)p.y}});
     } else if (code == LV_EVENT_DOUBLE_CLICKED) {
         self->_blank_requested = true;
     } else if (code == LV_EVENT_SHORT_CLICKED) {
@@ -488,11 +483,32 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
+    // Top row: < server name (n/m) [home = default] >
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
-    _title->setTextFont(&lv_font_montserrat_24);
+    _title->setTextFont(&lv_font_montserrat_20);
     _title->setTextColor(lv_color_hex(_color_text));
-    _title->align(LV_ALIGN_TOP_MID, 0, 10);
+    _title->setWidth(170);
+    _title->setLongMode(LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_align(_title->get(), LV_TEXT_ALIGN_CENTER, 0);
+    _title->align(LV_ALIGN_TOP_LEFT, 56, 14);
+    const char* symbols[3] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT};
+    const int xs[3]        = {8, 232, 274};
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t* b = lv_button_create(_panel->get());
+        lv_obj_set_size(b, 40, 36);
+        lv_obj_set_pos(b, xs[i], 6);
+        lv_obj_set_style_bg_color(b, lv_color_hex(0xE8EBFF), 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_style_radius(b, 10, 0);
+        lv_obj_set_user_data(b, (void*)(intptr_t)(i == 0 ? -1 : i == 1 ? 2 : 1));
+        lv_obj_add_event_cb(b, on_server_nav, LV_EVENT_CLICKED, this);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, symbols[i]);
+        lv_obj_set_style_text_color(l, lv_color_hex(_color_text), 0);
+        lv_obj_center(l);
+        _server_buttons[i] = b;
+    }
 
     // Left: QR code on a white card (y 50..206, above the home swipe zone)
     _qr_box = std::make_unique<Container>(*_panel);
@@ -555,6 +571,8 @@ void AppEmbodyMode::create_view()
     lv_obj_add_flag(_live_badge, LV_OBJ_FLAG_HIDDEN);
 
     view::create_home_indicator([&]() { close(); }, _color_theme, _color_text);
+    // Second button in the swipe-up bar: show or hide the pairing QR screen
+    view::set_home_indicator_extra_button("QR", [this]() { _toggle_qr_requested = true; });
     view::create_status_bar(_color_theme, _color_text);
 }
 
@@ -851,6 +869,50 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         _prox_base = -1;  // re-learn the baseline when it comes back
         mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
+    } else if (command == "server_add") {
+        // {"url": "ws://...|wss://...", "name", "token"}: add or update an entry (not the built-in one)
+        const std::string url = args["url"] | "";
+        if (url.rfind("ws://", 0) == 0 || url.rfind("wss://", 0) == 0) {
+            const std::string name = args["name"] | host_of(url).c_str();
+            const int i            = find_server(url);
+            if (i < 0) {
+                _servers.push_back({name, url, args["token"] | "", "added"});
+            } else if (i > 0) {
+                _servers[i].name = name;
+                if (args["token"].is<const char*>()) {
+                    _servers[i].token = args["token"].as<const char*>();
+                }
+            }
+            save_servers();
+        }
+        announce_servers();
+    } else if (command == "server_remove") {
+        // {"server": url or name}; not the built-in or the current one
+        const int i = find_server(args["server"] | "");
+        if (i > 0 && (size_t)i != _server_index) {
+            if (_servers[i].url == _default_url) {
+                _default_url = _servers[0].url;
+            }
+            _servers.erase(_servers.begin() + i);
+            if ((size_t)i < _server_index) {
+                _server_index--;
+            }
+            save_servers();
+        }
+        announce_servers();
+    } else if (command == "server_default") {
+        const int i = find_server(args["server"] | "");
+        if (i >= 0) {
+            _default_url = _servers[i].url;
+            save_servers();
+        }
+        announce_servers();
+    } else if (command == "server_switch") {
+        // Leaves this server: the robot reconnects to the other one right away
+        const int i = find_server(args["server"] | "");
+        if (i >= 0 && (size_t)i != _server_index) {
+            _pending_switch = i;
+        }
     } else if (command == "snapshot") {
         _snapshot_requested = true;  // taken in the app loop, outside the LVGL lock
     } else if (command == "camera_config") {
@@ -1664,6 +1726,198 @@ void AppEmbodyMode::update_power_events()
         queue_event("battery_removed");
     }
     mclog::tagInfo(_tag, "power events 0x{:02X}", ev);
+}
+
+
+/* --------------------------------- Servers -------------------------------- */
+
+// The built-in server (Kconfig) first, then the stored ones; the default from NVS.
+void AppEmbodyMode::load_servers()
+{
+    _servers.clear();
+    _servers.push_back({host_of(CONFIG_STACKCHAN_EMBODY_SERVER_URL), CONFIG_STACKCHAN_EMBODY_SERVER_URL,
+                        CONFIG_STACKCHAN_EMBODY_TOKEN, "built-in"});
+    Settings settings("embody", false);
+    ArduinoJson::JsonDocument doc;
+    if (!ArduinoJson::deserializeJson(doc, settings.GetString("servers", "[]"))) {
+        for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
+            const std::string url = o["url"] | "";
+            if (!url.empty() && find_server(url) < 0) {
+                _servers.push_back({o["name"] | host_of(url).c_str(), url, o["token"] | "", o["origin"] | "added"});
+            }
+        }
+    }
+    _default_url      = settings.GetString("default", _servers[0].url);
+    const int def     = find_server(_default_url);
+    _server_index     = def < 0 ? 0 : def;
+    _servers_rev++;
+}
+
+// Everything but the built-in entry (tokens included: NVS stays on the robot).
+void AppEmbodyMode::save_servers()
+{
+    ArduinoJson::JsonDocument doc;
+    auto arr = doc.to<ArduinoJson::JsonArray>();
+    for (size_t i = 1; i < _servers.size(); i++) {
+        auto o      = arr.add<ArduinoJson::JsonObject>();
+        o["name"]   = _servers[i].name;
+        o["url"]    = _servers[i].url;
+        o["token"]  = _servers[i].token;
+        o["origin"] = _servers[i].origin;
+    }
+    std::string json;
+    ArduinoJson::serializeJson(doc, json);
+    Settings settings("embody", true);
+    settings.SetString("servers", json);
+    settings.SetString("default", _default_url);
+    _servers_rev++;
+}
+
+int AppEmbodyMode::find_server(const std::string& key)
+{
+    for (size_t i = 0; i < _servers.size(); i++) {
+        if (_servers[i].url == key || _servers[i].name == key) {
+            return (int)i;
+        }
+    }
+    return -1;
+}
+
+// A server offers others (voluntarily): add them, or refresh ones it offered before.
+void AppEmbodyMode::merge_offers(const std::string& serversJson)
+{
+    ArduinoJson::JsonDocument doc;
+    if (ArduinoJson::deserializeJson(doc, serversJson)) {
+        return;
+    }
+    for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
+        const std::string url = o["url"] | "";
+        if (url.rfind("ws://", 0) != 0 && url.rfind("wss://", 0) != 0) {
+            continue;
+        }
+        const std::string name = o["name"] | host_of(url).c_str();
+        const int i            = find_server(url);
+        if (i < 0) {
+            _servers.push_back({name, url, o["token"] | "", "offered"});
+        } else if (_servers[i].origin == "offered") {
+            _servers[i].name = name;
+            if (o["token"].is<const char*>()) {
+                _servers[i].token = o["token"].as<const char*>();
+            }
+        }
+    }
+    save_servers();
+    announce_servers();
+}
+
+// The "servers" event: the list without tokens, the current and the default one.
+void AppEmbodyMode::announce_servers()
+{
+    ArduinoJson::JsonDocument doc;
+    auto arr = doc.to<ArduinoJson::JsonArray>();
+    for (const auto& e : _servers) {
+        auto o       = arr.add<ArduinoJson::JsonObject>();
+        o["name"]    = e.name;
+        o["url"]     = e.url;
+        o["origin"]  = e.origin;
+        o["token"]   = !e.token.empty();  // only whether there is one
+    }
+    std::string list;
+    ArduinoJson::serializeJson(doc, list);
+    queue_event("servers", {}, {{"list", list}, {"current", _servers[_server_index].url}, {"default", _default_url}});
+}
+
+void AppEmbodyMode::render_server_row()
+{
+    if (!_title || _servers_rev == _rendered_servers_rev) {
+        return;
+    }
+    _rendered_servers_rev = _servers_rev;
+    const auto& e         = _servers[_server_index];
+    _title->setText(_servers.size() > 1 ? fmt::format("{} {}/{}", e.name, _server_index + 1, _servers.size()) : e.name);
+    const bool is_default = e.url == _default_url;
+    lv_obj_set_style_bg_color(_server_buttons[1], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
+    for (int i : {0, 2}) {  // arrows only when there is somewhere to go
+        _servers.size() > 1 ? lv_obj_remove_flag(_server_buttons[i], LV_OBJ_FLAG_HIDDEN)
+                            : lv_obj_add_flag(_server_buttons[i], LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+// QR screen buttons (LVGL task): only record the request; the app loop acts on it.
+void AppEmbodyMode::on_server_nav(lv_event_t* e)
+{
+    auto* self = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
+    self->_nav_request = (int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
+}
+
+// (Re)connects to _servers[index]: a fresh client with that URL and token.
+void AppEmbodyMode::connect_server(size_t index)
+{
+    index         = std::min(index, _servers.size() - 1);
+    _server_index = index;
+    _client.reset();
+    _rendered_revision = UINT32_MAX;
+    _rendered_url.clear();
+    _rendered_viewers = 0;
+    _qr_visible       = true;
+    if (_panel) {
+        _panel->setHidden(false);
+    }
+    mclog::tagInfo(_tag, "server {}: {}", _servers[index].name, _servers[index].url);
+    _client = std::make_unique<embody::Client>(embody::Client::Config{
+        .serverUrl = _servers[index].url,
+        .token     = _servers[index].token,
+        .robotId   = _robot_id,
+        .model     = "stackchan-cores3",
+        .firmware  = esp_app_get_description()->version,
+        .commands  = _commands,
+        .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
+                         "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
+                         "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
+                         "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
+                         "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
+                         "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
+                         "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
+                         "hold_s", "usb_data", "yaw_pos_raw", "yaw_speed_raw", "yaw_current_raw", "yaw_moving",
+                         "pitch_voltage_v", "pitch_pos_raw", "pitch_speed_raw", "pitch_current_raw", "pitch_moving",
+                         "head_zone0", "head_zone1", "head_zone2", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
+                         "mag_raw_z", "mag_rhall", "light_ch0", "light_ch1", "rtc_unix", "system_unix", "pmic_ts_raw",
+                         "servo_power", "rotate_s"},
+    });
+    _client->onCommand = [this](const std::string& command, const std::string& args) {
+        _pending_commands.emplace_back(command, args);
+    };
+    _client->onBinary = [this](uint8_t type, const std::string& payload) {
+        if (type == _bin_show_jpeg) {
+            _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock
+        } else if (type == _bin_speaker_pcm) {
+            queue_speaker_audio(payload);
+        }
+    };
+    _client->collectTelemetry = [this]() {
+        auto& motion = GetStackChan().motion();
+        embody::Client::Telemetry t{
+            {"battery_pct", (float)GetHAL().getBatteryLevel()},
+            {"charging", GetHAL().isBatteryCharging() ? 1.0f : 0.0f},
+            {"head_yaw_deg", motion.getCurrentYawAngle() / 10.0f},
+            {"head_pitch_deg", motion.getCurrentPitchAngle() / 10.0f},
+            {"wifi_rssi_dbm", (float)WifiManager::GetInstance().GetRssi()},
+            {"free_heap_kb", (float)(esp_get_free_heap_size() / 1024)},
+            {"uptime_s", (float)(esp_timer_get_time() / 1000000)},
+            {"brightness_pct", (float)GetHAL().getBackLightBrightness()},
+            {"volume_pct", (float)GetHAL().getSpeakerVolume()},
+            {"screensaver", !_blank_screen ? 0.0f : (_blank_manual ? 2.0f : 1.0f)},  // 0 off, 1 auto, 2 manual
+            {"hold_s", _hold_until ? (float)(((int32_t)(_hold_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
+            {"rotate_s", _rotate_until ? (float)(((int32_t)(_rotate_until - GetHAL().millis()) + 999) / 1000) : 0.0f},
+            {"servo_power", _servo_power ? 1.0 : 0.0},
+            {"system_unix", (double)time(nullptr)},
+        };
+        add_sensor_telemetry(t);
+        return t;
+    };
+
+    _client->onServerOffer = [this](const std::string& offers) { merge_offers(offers); };
+    _servers_announced = false;  // tell the new server the list once registered
 }
 
 /* ---------------------------------- IR ------------------------------------ */

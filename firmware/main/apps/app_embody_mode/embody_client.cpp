@@ -196,6 +196,12 @@ void Client::handle_frame(const Inbound& in)
         _viewers     = body["viewers"] | 0;
         _status_text = _viewers == 1 ? "Paired with 1 browser" : fmt::format("Paired with {} browsers", _viewers);
         _revision++;
+    } else if (kind == "ServerOffer") {
+        if (onServerOffer && body["servers"].is<ArduinoJson::JsonArray>()) {
+            std::string servers;
+            ArduinoJson::serializeJson(body["servers"], servers);
+            onServerOffer(servers);
+        }
     } else if (kind == "RobotCommand") {
         _command_count++;
         std::string command = body["command"] | "";

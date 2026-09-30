@@ -84,6 +84,9 @@ public:
     // Binary messages from the server (e.g. 0x10 picture): type byte, then payload.
     std::function<void(uint8_t type, const std::string& payload)> onBinary;
 
+    // Other servers this server offers (ServerOffer): the JSON array of {name, url, token?}.
+    std::function<void(const std::string& serversJson)> onServerOffer;
+
     // Report something that happened on the robot, e.g. "shake", optionally with
     // numeric data such as {x, y} and text data such as {uid}. Dropped while offline.
     void sendEvent(const std::string& name, const Telemetry& data = {}, const Texts& text = {});
