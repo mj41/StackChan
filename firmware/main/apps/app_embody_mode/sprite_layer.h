@@ -36,11 +36,20 @@ public:
     // A file changed or was deleted: decode it again next time.
     void forget(const std::string& name);
 
-    // "sprite" args: {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms"}.
+    // "sprite" args: {"id", "asset", "x", "y", "scale", "angle", "opacity", "z", "hidden", "ms", "tap"}.
     // Returns "" or an error. Under the LVGL lock.
     std::string set(const ArduinoJson::JsonDocument& args);
     void hide(const std::string& id);
     void clear();
+
+    // What a tap at screen point (x, y) hit: the topmost visible sprite marked "tap"
+    // whose pixel there is not transparent; the point in the picture's own pixels
+    // (scale undone, rotation ignored). False if none. Under the LVGL lock.
+    struct Hit {
+        std::string id, asset;
+        int x = 0, y = 0;
+    };
+    bool hit(int x, int y, Hit& out) const;
 
 private:
     struct Sprite {
@@ -48,6 +57,8 @@ private:
         std::string asset;
         Image image;
         int x = 160, y = 120, z = 0;
+        float scale = 1;
+        bool tap    = false;  // reported by hit()
         uint32_t order = 0;  // creation order: ties in z keep it
     };
     struct Cached {

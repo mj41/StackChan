@@ -349,6 +349,7 @@ void AppEmbodyMode::onRunning()
         _picture = std::move(_pending_picture);  // keep the pixels alive while shown
         lv_image_set_src(_picture_obj, _picture->image_dsc());
         lv_obj_remove_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
+        _picture_asset = "sent";
         wake_screen();
     }
     if (_live_badge) {
@@ -471,7 +472,7 @@ void AppEmbodyMode::on_screen_event(lv_event_t* e)
         if (auto* indev = lv_indev_active()) {
             lv_indev_get_point(indev, &p);
         }
-        self->queue_event("screen_long_press", {{"x", (float)p.x}, {"y", (float)p.y}});
+        self->queue_tap("screen_long_press", p.x, p.y);
     } else if (code == LV_EVENT_DOUBLE_CLICKED) {
         self->_blank_requested = true;
     } else if (code == LV_EVENT_SHORT_CLICKED) {
@@ -479,8 +480,29 @@ void AppEmbodyMode::on_screen_event(lv_event_t* e)
         if (auto* indev = lv_indev_active()) {
             lv_indev_get_point(indev, &p);
         }
-        self->queue_event("screen_tap", {{"x", (float)p.x}, {"y", (float)p.y}});
+        self->queue_tap("screen_tap", p.x, p.y);
     }
+}
+
+// queue_tap reports a tap (or long press) with what it hit: the topmost tappable sprite
+// ("sprite", its "asset" and the point in that picture, "sprite_x"/"sprite_y") and the
+// full-screen picture shown ("picture"). A server draws menus from sprites and reads
+// the choice from here. Runs in the LVGL task.
+void AppEmbodyMode::queue_tap(const char* name, int x, int y)
+{
+    embody::Client::Telemetry data = {{"x", (double)x}, {"y", (double)y}};
+    embody::Client::Texts text;
+    embody::SpriteLayer::Hit hit;
+    if (_sprite_layer.hit(x, y, hit)) {
+        data.emplace_back("sprite_x", (double)hit.x);
+        data.emplace_back("sprite_y", (double)hit.y);
+        text.emplace_back("sprite", hit.id);
+        text.emplace_back("asset", hit.asset);
+    }
+    if (!_picture_asset.empty()) {
+        text.emplace_back("picture", _picture_asset);
+    }
+    queue_event(name, data, text);
 }
 
 void AppEmbodyMode::create_view()
@@ -893,6 +915,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
             }
         }
     } else if (command == "face") {
+        _picture_asset.clear();
         lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
         lv_image_set_src(_picture_obj, nullptr);
         _picture.reset();
@@ -1068,7 +1091,8 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         // {"asset": "pet/dream.jpg"}: a stored picture instead of the face ("face" ends it)
         const std::string asset = args["asset"] | "";
         if (auto image = _sprite_layer.cached(asset)) {
-            _picture = image;
+            _picture       = image;
+            _picture_asset = asset;
             lv_image_set_src(_picture_obj, _picture->image_dsc());
             lv_obj_remove_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
             wake_screen();

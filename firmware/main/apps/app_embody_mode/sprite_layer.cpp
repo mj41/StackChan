@@ -263,7 +263,12 @@ std::string SpriteLayer::set(const ArduinoJson::JsonDocument& args)
         lv_image_set_pivot(s.obj, dsc->header.w / 2, dsc->header.h / 2);
     }
     if (args["scale"].is<float>()) {
-        lv_image_set_scale(s.obj, (uint32_t)std::clamp(args["scale"].as<float>() * 256.0f, 26.0f, 2048.0f));
+        const uint32_t scale = (uint32_t)std::clamp(args["scale"].as<float>() * 256.0f, 26.0f, 2048.0f);
+        lv_image_set_scale(s.obj, scale);
+        s.scale = scale / 256.0f;
+    }
+    if (args["tap"].is<bool>()) {
+        s.tap = args["tap"].as<bool>();
     }
     if (args["angle"].is<float>()) {
         lv_image_set_rotation(s.obj, (int32_t)(args["angle"].as<float>() * 10));
@@ -285,6 +290,39 @@ std::string SpriteLayer::set(const ArduinoJson::JsonDocument& args)
         restack();
     }
     return "";
+}
+
+bool SpriteLayer::hit(int x, int y, Hit& out) const
+{
+    const Sprite* best = nullptr;
+    int bx = 0, by = 0;
+    for (const auto& [id, s] : _sprites) {
+        if (!s.tap || !s.image || lv_obj_has_flag(s.obj, LV_OBJ_FLAG_HIDDEN) || lv_obj_get_style_opa(s.obj, LV_PART_MAIN) == 0) {
+            continue;
+        }
+        const auto* dsc = s.image->image_dsc();
+        const int w = dsc->header.w, h = dsc->header.h;
+        // The picture is drawn scaled around its center (s.x, s.y).
+        const int px = (int)((x - s.x) / s.scale + w / 2.0f), py = (int)((y - s.y) / s.scale + h / 2.0f);
+        if (px < 0 || py < 0 || px >= w || py >= h) {
+            continue;
+        }
+        if (dsc->header.cf == LV_COLOR_FORMAT_ARGB8888 && dsc->data[py * dsc->header.stride + px * 4 + 3] < 64) {
+            continue;  // a transparent part: not the button
+        }
+        if (!best || s.z > best->z || (s.z == best->z && s.order > best->order)) {
+            best = &s;
+            bx = px, by = py;
+            out.id = id;
+        }
+    }
+    if (!best) {
+        return false;
+    }
+    out.asset = best->asset;
+    out.x     = bx;
+    out.y     = by;
+    return true;
 }
 
 void SpriteLayer::hide(const std::string& id)

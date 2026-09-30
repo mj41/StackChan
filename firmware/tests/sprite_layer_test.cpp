@@ -152,6 +152,18 @@ int main()
         expect(Screen::isRed(s.at(140, 200)), "a scaled sprite is red where its opaque half is");
     }
 
+    // Taps: the topmost sprite marked "tap", where its picture is not transparent.
+    set(layer, R"({"id": "btn", "asset": "red_half.png", "x": 160, "y": 60, "scale": 2, "tap": true, "z": 9})");
+    {
+        embody::SpriteLayer::Hit hit;
+        expect(layer.hit(150, 60, hit) && hit.id == "btn" && hit.asset == "red_half.png",
+               "a tap on the opaque half hits the button");
+        expect(hit.x == 11 && hit.y == 16, "the tap in the picture's pixels (scale 2): " + std::to_string(hit.x) + "," +
+                                               std::to_string(hit.y));
+        expect(!layer.hit(170, 60, hit), "a tap on the transparent half hits nothing");
+        expect(!layer.hit(150, 200, hit), "a sprite without tap is not a button");
+    }
+
     layer.hide("a");
     layer.clear();
     {

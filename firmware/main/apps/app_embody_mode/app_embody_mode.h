@@ -100,6 +100,8 @@ private:
     // Picture from the phone, shown over the face (below the QR panel)
     lv_obj_t* _picture_obj = nullptr;
     std::shared_ptr<LvglAllocatedImage> _picture;
+    std::string _picture_asset;  // the shown picture's file ("sent" for a JPEG from the server), "" = the face
+    void queue_tap(const char* name, int x, int y);
     std::shared_ptr<LvglAllocatedImage> _pending_picture;  // decoded, waiting for the LVGL lock
     std::string _pending_picture_jpeg;                     // received, waiting to be decoded
 
