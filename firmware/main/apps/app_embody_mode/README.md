@@ -26,7 +26,7 @@ Launcher app (first icon) that lets you control this Stack-chan from a browser t
 
 The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
-- **On the robot:** the QR screen's top row is `◀ name n/m ⌂ ▶`, and ✕ at the bottom right closes it. The arrows switch server (the robot reconnects and shows that server's QR), ⌂ makes the shown one the **default**, used at start.
+- **On the robot:** the QR screen's top row is `⌂ name n/m [Next ▶]`, and ✕ at the bottom right closes it. **Next** switches to the next server (the robot reconnects and shows that server's QR, and the QR screen stays open), ⌂ makes the shown one the **default**, used at start.
 - **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
 
 ## Configuration

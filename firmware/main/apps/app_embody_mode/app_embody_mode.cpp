@@ -485,29 +485,31 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
-    // Top row: < server name (n/m) [home = default] >; close (x) at the bottom right
+    // Top row: [home = default] server name (n/m) [Next >]; close (x) at the bottom right.
+    // Big buttons: small icons are hard to hit on this screen.
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
     _title->setTextFont(&lv_font_montserrat_20);
     _title->setTextColor(lv_color_hex(_color_text));
-    _title->setSize(172, 24);  // fixed height: one line, long names end in "..."
+    _title->setSize(160, 24);  // fixed height: one line, long names end in "..."
     _title->setLongMode(LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(_title->get(), LV_TEXT_ALIGN_CENTER, 0);
-    _title->align(LV_ALIGN_TOP_LEFT, 52, 4);
+    _title->align(LV_ALIGN_TOP_LEFT, 62, 4);
     _server_pos = std::make_unique<Label>(*_panel);
     _server_pos->setText("");
     _server_pos->setTextFont(&lv_font_montserrat_16);
     _server_pos->setTextColor(lv_color_hex(_color_muted));
-    _server_pos->setWidth(172);
+    _server_pos->setWidth(160);
     lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
-    _server_pos->align(LV_ALIGN_TOP_LEFT, 52, 28);
-    const char* symbols[4] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
-    const int xs[4]        = {8, 232, 276, 270};
-    const int ys[4]        = {6, 6, 6, 178};  // close: bottom right, above the home swipe zone
-    const int actions[4]   = {-1, 2, 1, 3};
-    for (int i = 0; i < 4; i++) {
+    _server_pos->align(LV_ALIGN_TOP_LEFT, 62, 28);
+    const char* labels[3] = {LV_SYMBOL_HOME, "Next " LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
+    const int xs[3]        = {6, 226, 262};
+    const int ys[3]        = {4, 4, 172};  // close: bottom right, above the home swipe zone
+    const int ws[3]        = {50, 88, 50};
+    const int actions[3]   = {2, 1, 3};
+    for (int i = 0; i < 3; i++) {
         lv_obj_t* b = lv_button_create(_panel->get());
-        lv_obj_set_size(b, 40, 36);
+        lv_obj_set_size(b, ws[i], 44);
         lv_obj_set_pos(b, xs[i], ys[i]);
         lv_obj_set_style_bg_color(b, lv_color_hex(0xE8EBFF), 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
@@ -515,7 +517,7 @@ void AppEmbodyMode::create_view()
         lv_obj_set_user_data(b, (void*)(intptr_t)actions[i]);
         lv_obj_add_event_cb(b, on_server_nav, LV_EVENT_CLICKED, this);
         lv_obj_t* l = lv_label_create(b);
-        lv_label_set_text(l, symbols[i]);
+        lv_label_set_text(l, labels[i]);
         lv_obj_set_style_text_color(l, lv_color_hex(_color_text), 0);
         lv_obj_center(l);
         _server_buttons[i] = b;
@@ -563,7 +565,7 @@ void AppEmbodyMode::create_view()
     _detail = std::make_unique<Label>(*_panel);
     _detail->setTextFont(&lv_font_montserrat_16);
     _detail->setTextColor(lv_color_hex(_color_muted));
-    _detail->setWidth(84);  // the close button sits to its right
+    _detail->setWidth(76);  // the close button sits to its right
     _detail->setLongMode(LV_LABEL_LONG_MODE_WRAP);
     _detail->align(LV_ALIGN_TOP_LEFT, 182, 184);
     _detail->setText("");
@@ -1856,11 +1858,10 @@ void AppEmbodyMode::render_server_row()
     _title->setText(e.name);
     _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _server_index + 1, _servers.size()) : "");
     const bool is_default = e.url == _default_url;
-    lv_obj_set_style_bg_color(_server_buttons[1], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
-    for (int i : {0, 2}) {  // arrows only when there is somewhere to go
-        _servers.size() > 1 ? lv_obj_remove_flag(_server_buttons[i], LV_OBJ_FLAG_HIDDEN)
-                            : lv_obj_add_flag(_server_buttons[i], LV_OBJ_FLAG_HIDDEN);
-    }
+    lv_obj_set_style_bg_color(_server_buttons[0], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
+    // Next only when there is somewhere to go
+    _servers.size() > 1 ? lv_obj_remove_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN)
+                        : lv_obj_add_flag(_server_buttons[1], LV_OBJ_FLAG_HIDDEN);
 }
 
 // QR screen buttons (LVGL task): only record the request; the app loop acts on it.
