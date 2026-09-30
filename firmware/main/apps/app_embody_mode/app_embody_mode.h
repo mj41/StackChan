@@ -83,6 +83,7 @@ private:
     // QR panel, shown over the face until a browser pairs
     std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _panel;
     std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _title;
+    std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _server_pos;  // "1/2" under the server name
     std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _qr_box;
     std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _qr_hint;
     std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Label> _status;

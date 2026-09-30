@@ -407,6 +407,7 @@ void AppEmbodyMode::onClose()
         _code.reset();
         _status.reset();
         _qr_hint.reset();
+        _server_pos.reset();
         _qr_box.reset();
         _title.reset();
         _panel.reset();
@@ -488,10 +489,17 @@ void AppEmbodyMode::create_view()
     _title->setText("Embody Mode");
     _title->setTextFont(&lv_font_montserrat_20);
     _title->setTextColor(lv_color_hex(_color_text));
-    _title->setWidth(132);
+    _title->setSize(132, 24);  // fixed height: one line, long names end in "..."
     _title->setLongMode(LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(_title->get(), LV_TEXT_ALIGN_CENTER, 0);
-    _title->align(LV_ALIGN_TOP_LEFT, 52, 14);
+    _title->align(LV_ALIGN_TOP_LEFT, 52, 4);
+    _server_pos = std::make_unique<Label>(*_panel);
+    _server_pos->setText("");
+    _server_pos->setTextFont(&lv_font_montserrat_16);
+    _server_pos->setTextColor(lv_color_hex(_color_muted));
+    _server_pos->setWidth(132);
+    lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
+    _server_pos->align(LV_ALIGN_TOP_LEFT, 52, 28);
     const char* symbols[4] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
     const int xs[4]        = {8, 188, 232, 276};
     const int actions[4]   = {-1, 2, 1, 3};
@@ -511,10 +519,10 @@ void AppEmbodyMode::create_view()
         _server_buttons[i] = b;
     }
 
-    // Left: QR code on a white card (y 50..206, above the home swipe zone)
+    // Left: QR code on a white card (y 58..214, below the server row, above the home swipe zone)
     _qr_box = std::make_unique<Container>(*_panel);
     _qr_box->setSize(156, 156);
-    _qr_box->align(LV_ALIGN_TOP_LEFT, 14, 50);
+    _qr_box->align(LV_ALIGN_TOP_LEFT, 14, 58);
     _qr_box->setBgColor(lv_color_hex(0xFFFFFF));
     _qr_box->setBorderWidth(0);
     _qr_box->setRadius(12);
@@ -541,13 +549,13 @@ void AppEmbodyMode::create_view()
     _status->setTextColor(lv_color_hex(_color_text));
     _status->setWidth(128);
     _status->setLongMode(LV_LABEL_LONG_MODE_WRAP);
-    _status->align(LV_ALIGN_TOP_LEFT, 182, 56);
+    _status->align(LV_ALIGN_TOP_LEFT, 182, 64);
     _status->setText("Connecting to server...");
 
     _code = std::make_unique<Label>(*_panel);
     _code->setTextFont(&lv_font_montserrat_20);
     _code->setTextColor(lv_color_hex(_color_text));
-    _code->align(LV_ALIGN_TOP_LEFT, 182, 146);
+    _code->align(LV_ALIGN_TOP_LEFT, 182, 154);
     _code->setText("");
 
     _detail = std::make_unique<Label>(*_panel);
@@ -555,7 +563,7 @@ void AppEmbodyMode::create_view()
     _detail->setTextColor(lv_color_hex(_color_muted));
     _detail->setWidth(128);
     _detail->setLongMode(LV_LABEL_LONG_MODE_WRAP);
-    _detail->align(LV_ALIGN_TOP_LEFT, 182, 176);
+    _detail->align(LV_ALIGN_TOP_LEFT, 182, 184);
     _detail->setText("");
 
     // Privacy indicator above everything while the camera or microphone streams
@@ -1839,7 +1847,8 @@ void AppEmbodyMode::render_server_row()
     }
     _rendered_servers_rev = _servers_rev;
     const auto& e         = _servers[_server_index];
-    _title->setText(_servers.size() > 1 ? fmt::format("{} {}/{}", e.name, _server_index + 1, _servers.size()) : e.name);
+    _title->setText(e.name);
+    _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _server_index + 1, _servers.size()) : "");
     const bool is_default = e.url == _default_url;
     lv_obj_set_style_bg_color(_server_buttons[1], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
     for (int i : {0, 2}) {  // arrows only when there is somewhere to go
