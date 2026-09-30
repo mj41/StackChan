@@ -483,25 +483,26 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
-    // Top row: < server name (n/m) [home = default] >
+    // Top row: < server name (n/m) [home = default] > [x = close]
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
     _title->setTextFont(&lv_font_montserrat_20);
     _title->setTextColor(lv_color_hex(_color_text));
-    _title->setWidth(170);
+    _title->setWidth(132);
     _title->setLongMode(LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(_title->get(), LV_TEXT_ALIGN_CENTER, 0);
-    _title->align(LV_ALIGN_TOP_LEFT, 56, 14);
-    const char* symbols[3] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT};
-    const int xs[3]        = {8, 232, 274};
-    for (int i = 0; i < 3; i++) {
+    _title->align(LV_ALIGN_TOP_LEFT, 52, 14);
+    const char* symbols[4] = {LV_SYMBOL_LEFT, LV_SYMBOL_HOME, LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE};
+    const int xs[4]        = {8, 188, 232, 276};
+    const int actions[4]   = {-1, 2, 1, 3};
+    for (int i = 0; i < 4; i++) {
         lv_obj_t* b = lv_button_create(_panel->get());
         lv_obj_set_size(b, 40, 36);
         lv_obj_set_pos(b, xs[i], 6);
         lv_obj_set_style_bg_color(b, lv_color_hex(0xE8EBFF), 0);
         lv_obj_set_style_shadow_width(b, 0, 0);
         lv_obj_set_style_radius(b, 10, 0);
-        lv_obj_set_user_data(b, (void*)(intptr_t)(i == 0 ? -1 : i == 1 ? 2 : 1));
+        lv_obj_set_user_data(b, (void*)(intptr_t)actions[i]);
         lv_obj_add_event_cb(b, on_server_nav, LV_EVENT_CLICKED, this);
         lv_obj_t* l = lv_label_create(b);
         lv_label_set_text(l, symbols[i]);
@@ -592,6 +593,10 @@ void AppEmbodyMode::render()
     _rendered_viewers = _client->viewers();
     if (_toggle_qr_requested.exchange(false) && _client->isRegistered()) {
         _qr_visible = !_qr_visible;
+        changed     = true;
+    }
+    if (_qr_hide_requested.exchange(false) && _qr_visible) {
+        _qr_visible = false;
         changed     = true;
     }
     if (changed) {
@@ -1846,8 +1851,13 @@ void AppEmbodyMode::render_server_row()
 // QR screen buttons (LVGL task): only record the request; the app loop acts on it.
 void AppEmbodyMode::on_server_nav(lv_event_t* e)
 {
-    auto* self = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
-    self->_nav_request = (int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
+    auto* self       = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
+    const int action = (int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
+    if (action == 3) {
+        self->_qr_hide_requested = true;  // close: back to the face
+    } else {
+        self->_nav_request = action;
+    }
 }
 
 // (Re)connects to _servers[index]: a fresh client with that URL and token.
