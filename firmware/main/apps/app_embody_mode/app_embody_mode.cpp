@@ -177,6 +177,10 @@ void AppEmbodyMode::onOpen()
     commands.push_back("touch_stream");
     commands.push_back("light_stream");
     commands.push_back("assets");
+    commands.push_back("sprite");
+    commands.push_back("sprite_hide");
+    commands.push_back("sprite_clear");
+    commands.push_back("picture");
     commands.push_back("asset_delete");
     commands.push_back("servo_power");
     commands.push_back("rotate");
@@ -330,6 +334,7 @@ void AppEmbodyMode::onRunning()
     update_ir();
     update_power_events();
 
+    prepare_pictures();  // decode stored pictures before taking the LVGL lock
     LvglLockGuard lock;
     for (const auto& [command, args] : _pending_commands) {
         run_command(command, args);
@@ -415,6 +420,7 @@ void AppEmbodyMode::onClose()
             lv_obj_delete(_live_badge);
             _live_badge = nullptr;
         }
+        _sprite_layer.destroy();
         if (_picture_obj) {
             lv_obj_delete(_picture_obj);
             _picture_obj = nullptr;
@@ -490,6 +496,7 @@ void AppEmbodyMode::create_view()
     _picture_obj = lv_image_create(lv_screen_active());
     lv_obj_set_size(_picture_obj, 320, 240);
     lv_obj_align(_picture_obj, LV_ALIGN_CENTER, 0, 0);
+    _sprite_layer.create(lv_screen_active());  // above the face and pictures, below the QR panel
     lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
     listen(_picture_obj);
 
@@ -1018,9 +1025,34 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
     } else if (command == "assets") {
         send_asset_list();
+    } else if (command == "sprite") {
+        // {"id", "asset", "x", "y" (center), "scale", "angle", "opacity", "z", "hidden", "ms" (move time)}
+        const std::string err = _sprite_layer.set(args);
+        if (!err.empty()) {
+            const std::string asset = args["asset"] | "";
+            const auto why          = _asset_load_errors.find(asset);
+            queue_event("sprite_error", {}, {{"id", args["id"] | ""}, {"reason", why != _asset_load_errors.end() ? err + ": " + why->second : err}});
+        }
+    } else if (command == "sprite_hide") {
+        _sprite_layer.hide(args["id"] | "");
+    } else if (command == "sprite_clear") {
+        _sprite_layer.clear();
+    } else if (command == "picture") {
+        // {"asset": "pet/dream.jpg"}: a stored picture instead of the face ("face" ends it)
+        const std::string asset = args["asset"] | "";
+        if (auto image = _sprite_layer.cached(asset)) {
+            _picture = image;
+            lv_image_set_src(_picture_obj, _picture->image_dsc());
+            lv_obj_remove_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
+            wake_screen();
+        } else {
+            const auto why = _asset_load_errors.find(asset);
+            queue_event("sprite_error", {}, {{"id", "picture"}, {"reason", "cannot show " + asset + (why != _asset_load_errors.end() ? ": " + why->second : "")}});
+        }
     } else if (command == "asset_delete") {
         // {"name": "food/cake.png"}
         const std::string name = args["name"] | "";
+        _sprite_layer.forget(name);
         if (_assets.remove(name)) {
             queue_event("asset_deleted", {}, {{"name", name}});
         } else {
@@ -2036,6 +2068,7 @@ void AppEmbodyMode::connect_server(size_t index)
             if (!res.error.empty()) {
                 queue_event("asset_error", {}, {{"name", res.name}, {"reason", res.error}});
             } else if (res.done) {
+                _sprite_layer.forget(res.name);  // a new version: decode it again
                 queue_event("asset_saved", {{"bytes", (double)res.bytes}, {"crc", (double)res.crc}}, {{"name", res.name}});
             }
         }
@@ -2351,4 +2384,27 @@ void AppEmbodyMode::send_asset_list()
     _assets.usage(total, free);
     queue_event("assets", {{"total", (double)total}, {"free", (double)free}, {"mounted", _assets.mounted() ? 1.0 : 0.0}},
                 {{"list", list}});
+}
+
+// Decodes the stored pictures that pending sprite/picture commands show, outside the
+// LVGL lock (a PNG takes a few ms); run_command then finds them in the cache.
+void AppEmbodyMode::prepare_pictures()
+{
+    for (const auto& [command, args_json] : _pending_commands) {
+        if (command != "sprite" && command != "picture") {
+            continue;
+        }
+        ArduinoJson::JsonDocument args;
+        ArduinoJson::deserializeJson(args, args_json);
+        const std::string asset = args["asset"] | "";
+        if (asset.empty()) {
+            continue;
+        }
+        const std::string err = _sprite_layer.load(_assets, asset);
+        if (err.empty()) {
+            _asset_load_errors.erase(asset);
+        } else {
+            _asset_load_errors[asset] = err;
+        }
+    }
 }

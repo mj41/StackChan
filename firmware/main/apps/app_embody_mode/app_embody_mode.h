@@ -6,6 +6,7 @@
 #pragma once
 #include "embody_client.h"
 #include "asset_store.h"
+#include "sprite_layer.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
 #include <hal/drivers/IrRemote/ir_remote.h>
@@ -15,6 +16,7 @@
 #include <atomic>
 #include <cstddef>
 #include <deque>
+#include <map>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -157,6 +159,10 @@ private:
     // Uploaded pictures and sounds (binary 0x11), kept in the userdata partition.
     embody::AssetStore _assets;
     void send_asset_list();
+    // Stored pictures shown over the face ("sprite") or full screen ("picture" with an asset).
+    embody::SpriteLayer _sprite_layer;
+    std::map<std::string, std::string> _asset_load_errors;  // why a file could not be decoded
+    void prepare_pictures();
     bool _auto_brightness     = false;
     float _lux                = -1;  // smoothed; < 0 until the first reading
     uint16_t _proximity       = 0;
