@@ -193,7 +193,8 @@ void Client::handle_frame(const Inbound& in)
         mclog::tagInfo(_tag, "pair code {} -> {}", _pair_code, _pair_url);
         _revision++;
     } else if (kind == "Paired") {
-        _viewers     = body["viewers"] | 0;
+        _viewers             = body["viewers"] | 0;
+        _paired_on_reconnect = body["reconnect"] | false;
         _status_text = _viewers == 1 ? "Paired with 1 browser" : fmt::format("Paired with {} browsers", _viewers);
         _revision++;
     } else if (kind == "ServerOffer") {

@@ -66,6 +66,11 @@ public:
     {
         return _viewers;
     }
+    // The last Paired only said "browsers were paired before" (on reconnect), not a new scan.
+    bool pairedOnReconnect() const
+    {
+        return _paired_on_reconnect;
+    }
     // Increments whenever anything shown on screen changes.
     uint32_t revision() const
     {
@@ -121,6 +126,7 @@ private:
     std::string _pair_url;
     std::string _pair_code;
     int _viewers        = 0;
+    bool _paired_on_reconnect = false;
     uint32_t _revision  = 0;
     uint32_t _command_count = 0;
     bool _announced     = false;  // "Connecting…" shown before the blocking connect

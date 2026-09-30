@@ -244,6 +244,7 @@ void AppEmbodyMode::onRunning()
             announce_servers();
         } else if (_servers.size() > 1) {
             _pending_switch = (int)((_server_index + _servers.size() + nav) % _servers.size());
+            _qr_pinned      = true;  // chosen on the QR screen: stay there
         }
     }
     if (_pending_switch >= 0) {
@@ -594,8 +595,11 @@ void AppEmbodyMode::render()
 
     // The first browser to pair switches to the face; a long press toggles the QR.
     bool changed = false;
-    if (_client->viewers() > 0 && _rendered_viewers == 0) {
+    // Browsers paired: show the face. Not for a mere "paired before" on reconnect while the
+    // QR screen is pinned (browsing servers there); a new scan always shows the face.
+    if (_client->viewers() > _rendered_viewers && !(_qr_pinned && _client->pairedOnReconnect())) {
         _qr_visible = false;
+        _qr_pinned  = false;
         changed     = true;
         wake_screen();
     }
@@ -606,6 +610,7 @@ void AppEmbodyMode::render()
     }
     if (_qr_hide_requested.exchange(false) && _qr_visible) {
         _qr_visible = false;
+        _qr_pinned  = false;
         changed     = true;
     }
     if (changed) {

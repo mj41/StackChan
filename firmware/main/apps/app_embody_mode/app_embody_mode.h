@@ -76,6 +76,7 @@ private:
     std::atomic<int> _nav_request{0};            // from the QR screen: -1 prev, +1 next, 2 make default
     lv_obj_t* _server_buttons[4] = {};           // prev, default, next, close
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
+    bool _qr_pinned = false;  // switched servers on the QR screen: keep it until closed or a new scan
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;
     bool _network_started = false;
