@@ -75,7 +75,7 @@ private:
     bool _servers_announced = false;
     int _pending_switch     = -1;                // from server_switch, done at the top of the loop
     std::atomic<int> _nav_request{0};            // from the QR screen: +1 next, 2 pin, 3 connect/close
-    lv_obj_t* _server_buttons[3] = {};           // default (home), next, close
+    lv_obj_t* _server_buttons[3] = {};           // pin, next, back to app / connect
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
     bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text

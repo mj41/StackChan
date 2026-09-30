@@ -496,7 +496,7 @@ void AppEmbodyMode::create_view()
     _panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
     listen(_panel->get());
 
-    // Top row: [Pin = default] server name (n/m) [Next >]; close (x) at the bottom right.
+    // Top row: [Pin = default] server name (n/m) [Next >]; "Back to app" / "Connect" at the bottom right.
     // Big buttons: small icons are hard to hit on this screen.
     _title = std::make_unique<Label>(*_panel);
     _title->setText("Embody Mode");
@@ -513,7 +513,7 @@ void AppEmbodyMode::create_view()
     _server_pos->setWidth(160);
     lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
     _server_pos->align(LV_ALIGN_TOP_LEFT, 62, 28);
-    const char* labels[3] = {"Pin", "Next " LV_SYMBOL_RIGHT, LV_SYMBOL_CLOSE " Close"};
+    const char* labels[3] = {"Pin", "Next " LV_SYMBOL_RIGHT, "Back to app"};
     const int xs[3]        = {6, 226, 182};
     const int ys[3]        = {4, 4, 172};  // close (or connect): bottom right, above the home swipe zone
     const int ws[3]        = {50, 88, 132};
@@ -1899,7 +1899,7 @@ void AppEmbodyMode::render_server_row()
     _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _shown_index + 1, _servers.size()) : "");
     const bool is_default = e.url == _default_url;
     lv_obj_set_style_bg_color(_server_buttons[0], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
-    lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), is_current ? LV_SYMBOL_CLOSE " Close" : "Connect");
+    lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), is_current ? "Back to app" : "Connect");
     // The connect button stands out while it would switch servers
     lv_obj_set_style_bg_color(_server_buttons[2], lv_color_hex(is_current ? 0xE8EBFF : _color_theme), 0);
     _rendered_revision = UINT32_MAX;  // the QR side follows the shown server
