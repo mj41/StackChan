@@ -28,6 +28,9 @@ public:
     bool readProximity(uint16_t& value);
     // Proximity on/off. Off puts it in standby: its IR LED stops pulsing. Light keeps working.
     bool setProximityEnabled(bool on);
+    // Fast: proximity every 50 ms and light every 100 ms (for a stream); else the
+    // defaults above. The light integration time stays 100 ms, so lux is unchanged.
+    bool setFastRate(bool fast);
 
 private:
     i2c_master_dev_handle_t _dev = nullptr;

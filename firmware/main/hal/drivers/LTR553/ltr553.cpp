@@ -24,7 +24,9 @@ constexpr uint8_t ALS_GAIN_4X      = 0x02;
 constexpr float ALS_GAIN           = 4.0f;
 constexpr float ALS_INT_100MS      = 1.0f;  // integration time in units of 100 ms
 constexpr uint8_t ALS_INT_TIME_100 = 0x00;
+constexpr uint8_t ALS_RATE_100MS   = 0x01;
 constexpr uint8_t ALS_RATE_500MS   = 0x03;
+constexpr uint8_t PS_RATE_50MS     = 0x00;
 constexpr uint8_t PS_RATE_100MS    = 0x02;
 // 60 kHz pulses, 100 % duty, 100 mA peak (the datasheet default), 4 pulses per reading
 constexpr uint8_t PS_LED_DEFAULT = (0x03 << 5) | (0x03 << 3) | 0x04;
@@ -132,4 +134,10 @@ bool LTR553::readProximity(uint16_t& value)
 bool LTR553::setProximityEnabled(bool on)
 {
     return _dev && wr(REG_PS_CONTR, on ? 0x02 : 0x00);
+}
+
+bool LTR553::setFastRate(bool fast)
+{
+    return _dev && wr(REG_PS_MEAS_RATE, fast ? PS_RATE_50MS : PS_RATE_100MS) &&
+           wr(REG_ALS_MEAS_RATE, (ALS_INT_TIME_100 << 3) | (fast ? ALS_RATE_100MS : ALS_RATE_500MS));
 }

@@ -71,7 +71,8 @@ static constexpr uint8_t _bin_camera_jpeg = 0x01;
 static constexpr uint8_t _bin_audio_multi = 0x04;  // rate, channel count, interleaved PCM
 static constexpr uint8_t _bin_imu         = 0x05;  // count, then (uint32 ms, 9 x float32) per sample
 static constexpr uint8_t _bin_snapshot    = 0x07;  // full-resolution JPEG still
-static constexpr uint8_t _bin_touch       = 0x06;  // frames: (uint32 ms, uint8 n, n x (uint8 id, uint16 x, uint16 y))
+static constexpr uint8_t _bin_touch       = 0x06;
+static constexpr uint8_t _bin_light       = 0x08;  // count, then (uint32 ms, uint16 ps, uint16 ch0, uint16 ch1) per sample  // frames: (uint32 ms, uint8 n, n x (uint8 id, uint16 x, uint16 y))
 static constexpr uint8_t _bin_speaker_pcm = 0x03;
 static constexpr uint8_t _bin_show_jpeg   = 0x10;
 
@@ -173,6 +174,7 @@ void AppEmbodyMode::onOpen()
     commands.push_back("hold");
     commands.push_back("imu_stream");
     commands.push_back("touch_stream");
+    commands.push_back("light_stream");
     commands.push_back("servo_power");
     commands.push_back("rotate");
     for (const char* c : {"server_add", "server_remove", "server_default", "server_switch"}) {
@@ -377,6 +379,7 @@ void AppEmbodyMode::onClose()
     _touch_streaming = false;
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
+    set_light_stream(false);
     _nfc.reset();
     _nfc_enabled = false;
     stop_led_effect(false);
@@ -1009,6 +1012,8 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}; velocity 0 stops
         const int velocity = args["velocity"] | 0;
         velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
+    } else if (command == "light_stream") {
+        set_light_stream(args["on"] | false);
     } else if (command == "imu_stream") {
         _imu_streaming = args["on"] | false;
         GetHAL().setImuStreaming(_imu_streaming);
@@ -1401,6 +1406,7 @@ void AppEmbodyMode::start_standby(int minutes)
     _touch_streaming = false;
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
+    set_light_stream(false);
     _camera_on = false;
     auto& sc   = GetStackChan();
     stop_led_effect(false);
@@ -1556,6 +1562,7 @@ void AppEmbodyMode::speaker_task(void* arg)
 
 static constexpr uint32_t _prox_interval_ms  = 200;
 static constexpr uint32_t _light_interval_ms = 500;
+static constexpr uint32_t _light_stream_ms   = 50;  // stream sample period; the sensor reads proximity every 50 ms, light every 100 ms
 // Proximity above the "nobody near" baseline: enter near / leave near (hysteresis).
 static constexpr float _prox_near_delta = 150;
 static constexpr float _prox_far_delta  = 60;
@@ -1574,8 +1581,10 @@ void AppEmbodyMode::update_light()
     }
     const uint32_t now = GetHAL().millis();
 
+    const uint32_t prox_every  = _light_streaming ? _light_stream_ms : _prox_interval_ms;
+    const uint32_t light_every = _light_streaming ? 2 * _light_stream_ms : _light_interval_ms;
     uint16_t ps = 0;
-    if (_proximity_on && now - _last_prox_read >= _prox_interval_ms && _light->readProximity(ps)) {
+    if (_proximity_on && now - _last_prox_read >= prox_every && _light->readProximity(ps)) {
         _last_prox_read = now;
         _proximity      = ps;
         if (_prox_base < 0) {
@@ -1601,16 +1610,54 @@ void AppEmbodyMode::update_light()
     }
 
     float lux = 0;
-    if (now - _last_light_read >= _light_interval_ms && _light->readLux(lux, &_light_ch0, &_light_ch1)) {
+    if (now - _last_light_read >= light_every && _light->readLux(lux, &_light_ch0, &_light_ch1)) {
         _last_light_read = now;
-        _lux             = _lux < 0 ? lux : _lux + (lux - _lux) * 0.3f;
-        if (_auto_brightness && !_standby_until) {
-            const int target = brightness_for_lux(_lux);
-            if (std::abs(target - (int)GetHAL().getBackLightBrightness()) >= 4) {
-                GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
+        if (now - _last_lux_update >= _light_interval_ms) {  // lux and auto-brightness keep the slow pace
+            _last_lux_update = now;
+            _lux             = _lux < 0 ? lux : _lux + (lux - _lux) * 0.3f;
+            if (_auto_brightness && !_standby_until) {
+                const int target = brightness_for_lux(_lux);
+                if (std::abs(target - (int)GetHAL().getBackLightBrightness()) >= 4) {
+                    GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
+                }
             }
         }
     }
+
+    // Stream: the latest raw values every 50 ms (proximity 0 while it is off), sent every 200 ms.
+    if (!_light_streaming || now - _last_light_sample < _light_stream_ms) {
+        return;
+    }
+    _last_light_sample = now;
+    const uint16_t sample[3] = {(uint16_t)(_proximity_on ? _proximity : 0), _light_ch0, _light_ch1};
+    _light_samples.append((const char*)&now, 4);  // little-endian
+    _light_samples.append((const char*)sample, sizeof(sample));
+    _light_sample_count++;
+    if (now - _last_light_send >= 200 && _client) {
+        _last_light_send = now;
+        std::string msg;
+        msg.push_back((char)(_light_sample_count & 0xFF));
+        msg.push_back((char)(_light_sample_count >> 8));
+        msg += _light_samples;
+        _client->sendBinary(_bin_light, (const uint8_t*)msg.data(), msg.size());
+        _light_samples.clear();
+        _light_sample_count = 0;
+    }
+}
+
+// light_stream: raw proximity and light samples as binary 0x08 (sensor at its fast rate).
+void AppEmbodyMode::set_light_stream(bool on)
+{
+    if (on == _light_streaming) {
+        return;
+    }
+    _light_streaming = on;
+    _light_samples.clear();
+    _light_sample_count = 0;
+    if (_light) {
+        _light->setFastRate(on);
+    }
+    mclog::tagInfo(_tag, "light stream {}", on ? "on" : "off");
 }
 
 /* -------------------------------- Rotation -------------------------------- */

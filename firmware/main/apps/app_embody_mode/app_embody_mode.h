@@ -160,6 +160,14 @@ private:
     bool _near                = false;
     uint32_t _last_light_read = 0;
     uint32_t _last_prox_read  = 0;
+    uint32_t _last_lux_update = 0;  // auto-brightness keeps its slow pace while streaming
+    // Raw light stream (binary 0x08), on while asked (light_stream): 20 samples/s.
+    bool _light_streaming         = false;
+    std::string _light_samples;  // pending: (uint32 ms, uint16 ps, uint16 ch0, uint16 ch1) each
+    uint16_t _light_sample_count  = 0;
+    uint32_t _last_light_sample   = 0;
+    uint32_t _last_light_send     = 0;
+    void set_light_stream(bool on);
 
     // Power: the body battery monitor (INA226) and the CoreS3 power chip (AXP2101)
     // for telemetry; power-key and plug events are polled from the AXP2101.
