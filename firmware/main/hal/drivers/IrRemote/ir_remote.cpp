@@ -137,7 +137,7 @@ bool IrRemote::send(const std::vector<uint32_t>& timings, uint32_t carrierHz, bo
     return ok;
 }
 
-std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command, int repeats)
+std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command, int repeats, int frames)
 {
     const uint8_t lo    = address & 0xFF;
     const uint8_t hi    = address > 0xFF ? (address >> 8) : (uint8_t)~lo;  // extended NEC has a 16-bit address
@@ -148,11 +148,17 @@ std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command, in
         t.push_back((b[i / 8] >> (i % 8)) & 1 ? NEC_ONE_SPACE : NEC_ZERO_SPACE);  // LSB first
     }
     t.push_back(NEC_BIT_MARK);
-    // Repeat codes (9 ms mark, 2.25 ms space, stop mark), each starting 108 ms after the previous start.
+    // Whole frames and then repeat codes (9 ms mark, 2.25 ms space, stop mark), each starting
+    // 108 ms after the previous start.
     constexpr uint32_t period = 108000, repeat_len = NEC_LEAD_MARK + NEC_REPEAT_SPACE + NEC_BIT_MARK;
     uint32_t frame_len = 0;
     for (uint32_t v : t) {
         frame_len += v;
+    }
+    const std::vector<uint32_t> frame = t;
+    for (int f = 1; f < frames; f++) {  // extra copies of the whole frame, for weak links
+        t.push_back(period - frame_len);
+        t.insert(t.end(), frame.begin(), frame.end());
     }
     for (int r = 0; r < repeats; r++) {
         t.push_back(period - (r == 0 ? frame_len : repeat_len));
@@ -163,9 +169,9 @@ std::vector<uint32_t> IrRemote::necTimings(uint16_t address, uint8_t command, in
     return t;
 }
 
-bool IrRemote::sendNec(uint16_t address, uint8_t command, bool hearSelf, int repeats)
+bool IrRemote::sendNec(uint16_t address, uint8_t command, bool hearSelf, int repeats, int frames)
 {
-    return send(necTimings(address, command, repeats), 38000, hearSelf);
+    return send(necTimings(address, command, repeats, frames), 38000, hearSelf);
 }
 
 std::vector<uint32_t> IrRemote::repeated(const std::vector<uint32_t>& frame, int repeats, uint32_t gapMs)

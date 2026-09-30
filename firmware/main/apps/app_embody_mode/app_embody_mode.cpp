@@ -716,6 +716,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         const std::string raw = args["raw"] | "";
         const bool loopback   = args["loopback"] | false;
         const int repeats     = std::clamp(args["repeat"] | 0, 0, 20);  // like holding the button
+        const int frames      = std::clamp(args["frames"] | 1, 1, 5);   // whole frame N times (weak links)
         bool ok               = false;
         // The proximity sensor's IR LED pulses ~10x/s next to ours: pause it while sending.
         const bool pause_proximity = _light && _proximity_on;
@@ -723,10 +724,10 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
             _light->setProximityEnabled(false);
         }
         if (_ir && !raw.empty()) {
-            ok = _ir->send(IrRemote::repeated(IrRemote::timingsFromString(raw), repeats), args["carrier_hz"] | 38000,
-                           loopback);
+            ok = _ir->send(IrRemote::repeated(IrRemote::timingsFromString(raw), std::max(repeats, frames - 1)),
+                           args["carrier_hz"] | 38000, loopback);
         } else if (_ir) {
-            ok = _ir->sendNec(args["address"] | 0, args["command"] | 0, loopback, repeats);
+            ok = _ir->sendNec(args["address"] | 0, args["command"] | 0, loopback, repeats, frames);
         }
         if (pause_proximity) {
             _light->setProximityEnabled(true);
