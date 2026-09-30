@@ -13,6 +13,7 @@
 #include <uitk/short_namespace.hpp>
 #include <smooth_lvgl.hpp>
 #include <array>
+#include <vector>
 #include <lvgl_image.h>
 #include <string_view>
 
@@ -33,6 +34,12 @@ struct ImuSample_t {
     uint16_t mag_rhall = 0;
 };
 
+// One raw IMU sample of the 100 Hz stream: time and accel (m/s^2), gyro (deg/s), magnetic field (uT).
+struct ImuStreamSample_t {
+    uint32_t t_ms = 0;
+    float v[9]    = {};
+};
+
 // One SCS servo's feedback registers.
 struct ServoStatus_t {
     int position    = 0;  // raw 0..1000
@@ -40,6 +47,8 @@ struct ServoStatus_t {
     float voltage   = 0;  // V
     int temperature = 0;  // degrees C
     bool moving     = false;
+    int speed       = 0;  // raw, signed by direction
+    int current     = 0;  // raw, signed (units not documented for the SCS0009)
 };
 
 /**
@@ -285,6 +294,10 @@ public:
     uitk::Signal<ImuMotionEvent> onImuMotionEvent;
     // The latest sample (10 Hz). False until the IMU has delivered one. Any thread.
     bool getImuSample(ImuSample_t& out);
+    // Streaming: the IMU task samples at 100 Hz and buffers every sample (at most ~2 s)
+    // until takeImuStream() collects them. Off by default. Any thread.
+    void setImuStreaming(bool on);
+    void takeImuStream(std::vector<ImuStreamSample_t>& out);
 
     /* ---------------------------------- Time ---------------------------------- */
     void syncRtcTimeToSystem();

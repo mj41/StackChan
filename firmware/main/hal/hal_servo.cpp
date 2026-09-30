@@ -370,5 +370,7 @@ bool Hal::readServoStatus(int id, ServoStatus_t& out)
     out.voltage     = _scs_bus.ReadVoltage(-1) / 10.0f;
     out.temperature = _scs_bus.ReadTemper(-1);
     out.moving      = _scs_bus.ReadMove(-1) > 0;
+    out.speed       = _scs_bus.ReadSpeed(-1);
+    out.current     = _scs_bus.ReadCurrent(-1);
     return true;
 }

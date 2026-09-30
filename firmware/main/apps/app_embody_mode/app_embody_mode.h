@@ -158,7 +158,8 @@ private:
     std::atomic<TaskHandle_t> _mic_task{nullptr};  // cleared by the task when it exits
     std::mutex _mic_mutex;
     std::vector<int16_t> _mic_samples;
-    int _mic_rate = 0;
+    int _mic_rate     = 0;
+    int _mic_channels = 1;  // all codec input channels, interleaved in _mic_samples
 
     // Speaker: browser audio (binary 0x03) is resampled to the codec rate and
     // queued; a task plays it, and the mouth moves while it does.
@@ -204,6 +205,10 @@ private:
     // otherwise the firmware releases it at rest and the head can be turned by hand.
     uint32_t _hold_until = 0;  // ms; 0 = not holding
 
+    // Raw IMU stream (binary 0x05), on while a browser asks for it (the server sends imu_stream).
+    bool _imu_streaming      = false;
+    uint32_t _last_imu_send  = 0;
+
     void create_view();
     void render();
     void update_screensaver();
@@ -218,6 +223,7 @@ private:
     void update_light();
     void update_ir();
     void update_power_events();
+    void send_imu_stream();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();

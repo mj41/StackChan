@@ -59,13 +59,14 @@ static constexpr uint32_t _gesture_step_ms           = 260;
 
 // Binary message types (stackchan-server internal/wire)
 static constexpr uint8_t _bin_camera_jpeg = 0x01;
-static constexpr uint8_t _bin_audio_pcm   = 0x02;
+static constexpr uint8_t _bin_audio_multi = 0x04;  // rate, channel count, interleaved PCM
+static constexpr uint8_t _bin_imu         = 0x05;  // count, then (uint32 ms, 9 x float32) per sample
 static constexpr uint8_t _bin_speaker_pcm = 0x03;
 static constexpr uint8_t _bin_show_jpeg   = 0x10;
 
 static constexpr uint32_t _camera_interval_ms = 200;  // up to 5 fps
 static constexpr int _camera_jpeg_quality     = 25;
-static constexpr size_t _mic_max_buffer       = 24000;  // ~1 s at 24 kHz; older samples are dropped
+static constexpr size_t _mic_max_frames       = 24000;  // ~1 s at 24 kHz; older audio is dropped
 
 AppEmbodyMode::AppEmbodyMode()
 {
@@ -159,6 +160,7 @@ void AppEmbodyMode::onOpen()
     }
     commands.push_back("power_led");
     commands.push_back("hold");
+    commands.push_back("imu_stream");
 
     _client = std::make_unique<embody::Client>(embody::Client::Config{
         .serverUrl = server_url,
@@ -174,7 +176,9 @@ void AppEmbodyMode::onOpen()
                          "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
                          "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
                          "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv",
-                         "hold_s", "usb_data", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
+                         "hold_s", "usb_data", "yaw_pos_raw", "yaw_speed_raw", "yaw_current_raw", "yaw_moving",
+                         "pitch_voltage_v", "pitch_pos_raw", "pitch_speed_raw", "pitch_current_raw", "pitch_moving",
+                         "head_zone0", "head_zone1", "head_zone2", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
                          "mag_raw_z", "mag_rhall"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
@@ -296,6 +300,7 @@ void AppEmbodyMode::onRunning()
             send_camera_frame();
         }
         send_mic_audio();
+        send_imu_stream();
     }
 
     update_leds();
@@ -347,6 +352,8 @@ void AppEmbodyMode::onClose()
     stop_speaker();
     stop_nfc();
     stop_hold();
+    _imu_streaming = false;
+    GetHAL().setImuStreaming(false);
     _nfc.reset();
     _nfc_enabled = false;
     stop_led_effect(false);
@@ -608,11 +615,25 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         t.emplace_back("yaw_load_pct", servo.load / 10.0f);
         t.emplace_back("yaw_temp_c", (float)servo.temperature);
         t.emplace_back("servo_voltage_v", servo.voltage);
+        t.emplace_back("yaw_pos_raw", (float)servo.position);
+        t.emplace_back("yaw_speed_raw", (float)servo.speed);
+        t.emplace_back("yaw_current_raw", (float)servo.current);
+        t.emplace_back("yaw_moving", servo.moving ? 1.0f : 0.0f);
     }
     if (GetHAL().readServoStatus(2, servo)) {
         t.emplace_back("pitch_load_pct", servo.load / 10.0f);
         t.emplace_back("pitch_temp_c", (float)servo.temperature);
+        t.emplace_back("pitch_voltage_v", servo.voltage);
+        t.emplace_back("pitch_pos_raw", (float)servo.position);
+        t.emplace_back("pitch_speed_raw", (float)servo.speed);
+        t.emplace_back("pitch_current_raw", (float)servo.current);
+        t.emplace_back("pitch_moving", servo.moving ? 1.0f : 0.0f);
     }
+    // Head touch: current intensity per zone (0-3)
+    const auto zones = GetHAL().getHeadTouchZones();
+    t.emplace_back("head_zone0", (float)zones[0]);
+    t.emplace_back("head_zone1", (float)zones[1]);
+    t.emplace_back("head_zone2", (float)zones[2]);
 
     if (_light) {
         if (_lux >= 0) {
@@ -795,6 +816,10 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         _prox_base = -1;  // re-learn the baseline when it comes back
         mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
+    } else if (command == "imu_stream") {
+        _imu_streaming = args["on"] | false;
+        GetHAL().setImuStreaming(_imu_streaming);
+        mclog::tagInfo(_tag, "imu stream {}", _imu_streaming ? "on" : "off");
     } else if (command == "hold") {
         const int seconds = args["seconds"] | 0;  // 30..300; 0 = release now
         seconds > 0 ? start_hold(seconds) : stop_hold();
@@ -860,7 +885,8 @@ void AppEmbodyMode::start_mic()
         mclog::tagWarn(_tag, "mic: no audio codec");
         return;
     }
-    _mic_rate = codec->input_sample_rate();
+    _mic_rate     = codec->input_sample_rate();
+    _mic_channels = std::max(codec->input_channels(), 1);
     {
         std::lock_guard<std::mutex> lock(_mic_mutex);
         _mic_samples.clear();
@@ -874,7 +900,7 @@ void AppEmbodyMode::start_mic()
         return;
     }
     _mic_task = handle;
-    mclog::tagInfo(_tag, "mic on, {} Hz", _mic_rate);
+    mclog::tagInfo(_tag, "mic on, {} Hz, {} channels", _mic_rate, _mic_channels);
 }
 
 void AppEmbodyMode::stop_mic()
@@ -892,11 +918,12 @@ void AppEmbodyMode::stop_mic()
 
 void AppEmbodyMode::mic_task(void* arg)
 {
-    auto* self  = static_cast<AppEmbodyMode*>(arg);
-    auto codec  = Board::GetInstance().GetAudioCodec();
-    int channels = std::max(codec->input_channels(), 1);
-    // 20 ms per read; with several channels, the microphone is channel 1 (as in the SETUP mic test)
-    std::vector<int16_t> chunk((self->_mic_rate / 50) * channels);
+    auto* self   = static_cast<AppEmbodyMode*>(arg);
+    auto codec   = Board::GetInstance().GetAudioCodec();
+    const int ch = self->_mic_channels;
+    // 20 ms per read, all channels interleaved as the codec delivers them
+    std::vector<int16_t> chunk((self->_mic_rate / 50) * ch);
+    const size_t max_samples = _mic_max_frames * ch;
 
     codec->EnableInput(true);
     while (self->_mic_running) {
@@ -905,12 +932,9 @@ void AppEmbodyMode::mic_task(void* arg)
             continue;
         }
         std::lock_guard<std::mutex> lock(self->_mic_mutex);
-        for (size_t i = 0; i < chunk.size() / channels; i++) {
-            self->_mic_samples.push_back(chunk[i * channels + (channels > 1 ? 1 : 0)]);
-        }
-        if (self->_mic_samples.size() > _mic_max_buffer) {
-            self->_mic_samples.erase(self->_mic_samples.begin(),
-                                     self->_mic_samples.end() - _mic_max_buffer);
+        self->_mic_samples.insert(self->_mic_samples.end(), chunk.begin(), chunk.end());
+        if (self->_mic_samples.size() > max_samples) {
+            self->_mic_samples.erase(self->_mic_samples.begin(), self->_mic_samples.end() - max_samples);
         }
     }
     codec->EnableInput(false);
@@ -918,28 +942,32 @@ void AppEmbodyMode::mic_task(void* arg)
     vTaskDelete(nullptr);
 }
 
-// Sends buffered microphone audio: sample rate (uint16 LE), then s16le mono PCM.
+// Sends buffered microphone audio as binary 0x04: sample rate (uint16 LE), channel
+// count (uint8), then interleaved s16le PCM of all codec channels, in 50 ms messages.
 void AppEmbodyMode::send_mic_audio()
 {
     if (!_mic_running) {
         return;
     }
+    const int ch = _mic_channels;
     std::vector<int16_t> samples;
     {
         std::lock_guard<std::mutex> lock(_mic_mutex);
-        if (_mic_samples.size() < (size_t)(_mic_rate / 50)) {
+        if (_mic_samples.size() < (size_t)(_mic_rate / 50) * ch) {
             return;  // wait for at least 20 ms
         }
         samples.swap(_mic_samples);
     }
-    const size_t per_message = _mic_rate / 20;  // 50 ms
+    const size_t per_message = (size_t)(_mic_rate / 20) * ch;  // 50 ms
     for (size_t off = 0; off < samples.size(); off += per_message) {
         size_t n = std::min(per_message, samples.size() - off);
+        n -= n % ch;  // whole frames only
         std::string msg;
         msg.push_back((char)(_mic_rate & 0xFF));
         msg.push_back((char)(_mic_rate >> 8));
+        msg.push_back((char)ch);
         msg.append((const char*)(samples.data() + off), n * sizeof(int16_t));
-        _client->sendBinary(_bin_audio_pcm, (const uint8_t*)msg.data(), msg.size());
+        _client->sendBinary(_bin_audio_multi, (const uint8_t*)msg.data(), msg.size());
     }
 }
 
@@ -1130,6 +1158,8 @@ void AppEmbodyMode::start_standby(int minutes)
     stop_speaker();
     stop_nfc();
     stop_hold();
+    _imu_streaming = false;
+    GetHAL().setImuStreaming(false);
     _camera_on = false;
     auto& sc   = GetStackChan();
     stop_led_effect(false);
@@ -1340,6 +1370,33 @@ void AppEmbodyMode::update_light()
             }
         }
     }
+}
+
+/* ------------------------------- IMU stream ------------------------------- */
+
+// Buffered 100 Hz IMU samples as binary 0x05, every 100 ms: uint16 LE count, then per
+// sample uint32 LE time (ms) and 9 float32 LE (accel m/s^2, gyro deg/s, magnetic uT).
+void AppEmbodyMode::send_imu_stream()
+{
+    const uint32_t now = GetHAL().millis();
+    if (!_imu_streaming || now - _last_imu_send < 100) {
+        return;
+    }
+    _last_imu_send = now;
+    std::vector<ImuStreamSample_t> samples;
+    GetHAL().takeImuStream(samples);
+    if (samples.empty()) {
+        return;
+    }
+    std::string msg;
+    msg.reserve(2 + samples.size() * 40);
+    msg.push_back((char)(samples.size() & 0xFF));
+    msg.push_back((char)(samples.size() >> 8));
+    for (const auto& smp : samples) {
+        msg.append((const char*)&smp.t_ms, 4);  // the ESP32-S3 is little-endian
+        msg.append((const char*)smp.v, sizeof(smp.v));
+    }
+    _client->sendBinary(_bin_imu, (const uint8_t*)msg.data(), msg.size());
 }
 
 /* --------------------------------- Power ---------------------------------- */

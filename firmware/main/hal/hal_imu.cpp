@@ -10,6 +10,9 @@
 #include <mooncake_log.h>
 #include <memory>
 #include <mutex>
+#include <atomic>
+#include <vector>
+#include <esp_timer.h>
 
 static const std::string_view _tag = "HAL-IMU";
 
@@ -17,13 +20,21 @@ static std::unique_ptr<BMI270> _bmi270;
 static std::mutex _sample_mutex;
 static ImuSample_t _sample;
 static bool _has_sample = false;
+static std::atomic<bool> _streaming{false};
+static std::vector<ImuStreamSample_t> _stream;  // under _sample_mutex
+static constexpr size_t _stream_max = 200;      // 2 s at 100 Hz
 
 static void _imu_task(void* param)
 {
     auto motion_detector = std::make_unique<MotionDetector>();
     motion_detector->setShakeThreshold(16.0f);
 
+    // 10 Hz normally; 100 Hz while streaming. The shake detector keeps getting 10 Hz,
+    // as its threshold is tuned for that.
+    TickType_t wake = xTaskGetTickCount();
+    uint32_t n      = 0;
     while (1) {
+        const bool streaming = _streaming;
         if (_bmi270 && _bmi270->update()) {
             auto& data = _bmi270->getData();
             {
@@ -35,21 +46,26 @@ static void _imu_task(void* param)
                            {data.mag_raw_x, data.mag_raw_y, data.mag_raw_z},
                            data.mag_rhall};
                 _has_sample = true;
+                if (streaming) {
+                    if (_stream.size() >= _stream_max) {
+                        _stream.erase(_stream.begin());  // nobody collects: keep the newest
+                    }
+                    _stream.push_back({(uint32_t)(esp_timer_get_time() / 1000),
+                                       {data.accel_x, data.accel_y, data.accel_z, data.gyro_x, data.gyro_y,
+                                        data.gyro_z, data.mag_x, data.mag_y, data.mag_z}});
+                }
             }
-            // mclog::debug("IMU Accel: {:.2f}\t{:.2f}\t{:.2f}", data.accel_x, data.accel_y, data.accel_z);
 
-            motion_detector->update(data.accel_x, data.accel_y, data.accel_z);
-
-            if (motion_detector->isShakeDetected()) {
-                mclog::tagInfo(_tag, "Shake Detected!");
-                GetHAL().onImuMotionEvent.emit(ImuMotionEvent::Shake);
+            if (!streaming || n % 10 == 0) {
+                motion_detector->update(data.accel_x, data.accel_y, data.accel_z);
+                if (motion_detector->isShakeDetected()) {
+                    mclog::tagInfo(_tag, "Shake Detected!");
+                    GetHAL().onImuMotionEvent.emit(ImuMotionEvent::Shake);
+                }
             }
-            // if (motion_detector->isPickUpDetected()) {
-            //     mclog::tagInfo(_tag, "Pick Up Detected!");
-            //     GetHAL().onImuMotionEvent.emit(ImuMotionEvent::PickUp);
-            // }
         }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        n++;
+        vTaskDelayUntil(&wake, pdMS_TO_TICKS(streaming ? 10 : 100));
     }
 }
 
@@ -79,4 +95,20 @@ bool Hal::getImuSample(ImuSample_t& out)
     std::lock_guard<std::mutex> lock(_sample_mutex);
     out = _sample;
     return _has_sample;
+}
+
+void Hal::setImuStreaming(bool on)
+{
+    _streaming = on;
+    if (!on) {
+        std::lock_guard<std::mutex> lock(_sample_mutex);
+        _stream.clear();
+    }
+}
+
+void Hal::takeImuStream(std::vector<ImuStreamSample_t>& out)
+{
+    out.clear();
+    std::lock_guard<std::mutex> lock(_sample_mutex);
+    out.swap(_stream);
 }
