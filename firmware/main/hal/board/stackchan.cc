@@ -104,6 +104,36 @@ public:
         }
     }
 
+    void ReadStatus(hal_bridge::PmicStatus& out)
+    {
+        // ADC results are 14 bits: high 6 bits in the first register (reg 0x30 enables all channels at boot).
+        auto adc = [this](uint8_t reg) { return ((ReadReg(reg) & 0x3F) << 8) | ReadReg(reg + 1); };
+        out.status1     = ReadReg(0x00);
+        out.status2     = ReadReg(0x01);
+        out.battery_mv  = adc(0x34);
+        out.vbus_mv     = (out.status1 & 0x20) ? adc(0x38) : 0;
+        out.system_mv   = adc(0x3A);
+        out.die_temp_c  = 22.0f + (7274 - adc(0x3C)) / 20.0f;  // XPowersLib formula
+        out.battery_pct = ReadReg(0xA4);
+    }
+
+    // IRQ status 2 (0x49) latches power-key presses and plug changes; writing 1s clears them.
+    // The first call also enables those IRQ sources (reg 0x41), so they latch for sure.
+    uint8_t TakeEvents()
+    {
+        if (!events_enabled_) {
+            WriteReg(0x41, ReadReg(0x41) | 0xFC);
+            events_enabled_ = true;
+        }
+        const uint8_t v = ReadReg(0x49) & 0xFC;
+        if (v) {
+            WriteReg(0x49, v);
+        }
+        return v;
+    }
+
+    bool events_enabled_ = false;
+
     // Power Init
     Pmic(i2c_master_bus_handle_t i2c_bus, uint8_t addr) : Axp2101(i2c_bus, addr)
     {
@@ -673,9 +703,30 @@ public:
             pmic_->SetChargeLed(mode);
         }
     }
+
+    Pmic* GetPmic()
+    {
+        return pmic_;
+    }
 };
 
 DECLARE_BOARD(M5StackCoreS3Board);
+
+bool hal_bridge::board_get_pmic_status(PmicStatus& out)
+{
+    auto* pmic = ((M5StackCoreS3Board&)Board::GetInstance()).GetPmic();
+    if (!pmic) {
+        return false;
+    }
+    pmic->ReadStatus(out);
+    return true;
+}
+
+uint8_t hal_bridge::board_take_pmic_events()
+{
+    auto* pmic = ((M5StackCoreS3Board&)Board::GetInstance()).GetPmic();
+    return pmic ? pmic->TakeEvents() : 0;
+}
 
 void hal_bridge::board_set_charge_led(int mode)
 {

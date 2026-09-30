@@ -8,6 +8,7 @@
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
 #include <hal/drivers/IrRemote/ir_remote.h>
+#include <hal/drivers/INA226/ina226.h>
 #include <mooncake.h>
 #include <lvgl.h>
 #include <atomic>
@@ -137,6 +138,11 @@ private:
     uint32_t _last_light_read = 0;
     uint32_t _last_prox_read  = 0;
 
+    // Power: the body battery monitor (INA226) and the CoreS3 power chip (AXP2101)
+    // for telemetry; power-key and plug events are polled from the AXP2101.
+    std::unique_ptr<INA226> _body_power;
+    uint32_t _last_power_poll = 0;
+
     // Infrared (LED on G5, receiver on G10): "ir_send" and "ir_received" events.
     std::unique_ptr<IrRemote> _ir;
 
@@ -207,6 +213,7 @@ private:
     void add_sensor_telemetry(embody::Client::Telemetry& t);
     void update_light();
     void update_ir();
+    void update_power_events();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
     void pause_angle_sync();

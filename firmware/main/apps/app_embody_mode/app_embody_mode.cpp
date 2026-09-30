@@ -129,6 +129,14 @@ void AppEmbodyMode::onOpen()
     }
     _auto_brightness = _light != nullptr;
 
+    // Body battery monitor on the Power board.
+    _body_power = std::make_unique<INA226>();
+    if (!_body_power->begin(hal_bridge::board_get_i2c_bus())) {
+        mclog::tagWarn(_tag, "power: no INA226");
+        _body_power.reset();
+    }
+    hal_bridge::board_take_pmic_events();  // drop presses from before the app started
+
     // Infrared transmitter and receiver in the body.
     _ir = std::make_unique<IrRemote>();
     if (!_ir->begin(GPIO_NUM_5, GPIO_NUM_10)) {
@@ -161,7 +169,9 @@ void AppEmbodyMode::onOpen()
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
                          "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
                          "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
-                         "proximity", "proximity_on", "auto_brightness"},
+                         "proximity", "proximity_on", "auto_brightness", "core_battery_v", "core_vbus_v",
+                         "core_system_v", "core_charge", "core_charge_phase", "pmic_temp_c", "pmic_status1",
+                         "pmic_status2", "body_battery_v", "body_current_ma", "body_power_mw", "body_shunt_uv"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         _pending_commands.emplace_back(command, args);
@@ -286,6 +296,7 @@ void AppEmbodyMode::onRunning()
     update_leds();
     update_light();
     update_ir();
+    update_power_events();
 
     LvglLockGuard lock;
     for (const auto& [command, args] : _pending_commands) {
@@ -596,6 +607,27 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
         }
         t.emplace_back("proximity_on", _proximity_on ? 1.0f : 0.0f);
         t.emplace_back("auto_brightness", _auto_brightness ? 1.0f : 0.0f);
+    }
+
+    // CoreS3 power chip (its own battery and USB input), raw
+    hal_bridge::PmicStatus pmic;
+    if (hal_bridge::board_get_pmic_status(pmic)) {
+        t.emplace_back("core_battery_v", pmic.battery_mv / 1000.0f);
+        t.emplace_back("core_vbus_v", pmic.vbus_mv / 1000.0f);
+        t.emplace_back("core_system_v", pmic.system_mv / 1000.0f);
+        t.emplace_back("core_charge", (float)((pmic.status2 >> 5) & 0x03));  // 0 idle, 1 charging, 2 discharging
+        t.emplace_back("core_charge_phase", (float)(pmic.status2 & 0x07));  // 0 trickle .. 3 CV, 4 done, 5 not charging
+        t.emplace_back("pmic_temp_c", round_to(pmic.die_temp_c, 0.1f));
+        t.emplace_back("pmic_status1", (float)pmic.status1);
+        t.emplace_back("pmic_status2", (float)pmic.status2);
+    }
+    // Body battery (INA226 on the Power board), raw
+    INA226::Reading body;
+    if (_body_power && _body_power->read(body)) {
+        t.emplace_back("body_battery_v", round_to(body.bus_v, 0.001f));
+        t.emplace_back("body_current_ma", round_to(body.current_ma, 0.1f));
+        t.emplace_back("body_power_mw", round_to(body.power_mw, 1.0f));
+        t.emplace_back("body_shunt_uv", body.shunt_uv);
     }
 
     float celsius = 0;
@@ -1249,6 +1281,43 @@ void AppEmbodyMode::update_light()
             }
         }
     }
+}
+
+/* --------------------------------- Power ---------------------------------- */
+
+// Power key and plug changes latched by the AXP2101, polled every 100 ms. A short
+// press of the power button also wakes the screen, like a touch.
+void AppEmbodyMode::update_power_events()
+{
+    const uint32_t now = GetHAL().millis();
+    if (now - _last_power_poll < 100) {
+        return;
+    }
+    _last_power_poll = now;
+    const uint8_t ev = hal_bridge::board_take_pmic_events();
+    if (!ev) {
+        return;
+    }
+    if (ev & 0x08) {
+        _last_physical = now;
+        queue_event("power_button", {}, {{"press", "short"}});
+    }
+    if (ev & 0x04) {
+        queue_event("power_button", {}, {{"press", "long"}});
+    }
+    if (ev & 0x80) {
+        queue_event("usb_plugged");
+    }
+    if (ev & 0x40) {
+        queue_event("usb_unplugged");
+    }
+    if (ev & 0x20) {
+        queue_event("battery_inserted");
+    }
+    if (ev & 0x10) {
+        queue_event("battery_removed");
+    }
+    mclog::tagInfo(_tag, "power events 0x{:02X}", ev);
 }
 
 /* ---------------------------------- IR ------------------------------------ */

@@ -56,6 +56,21 @@ void set_xiaozhi_config(const XiaozhiConfig_t& config);
 i2c_master_bus_handle_t board_get_i2c_bus();
 // Red power/charge LED: 0 off, 1 blink 1 Hz, 2 blink 4 Hz, 3 on, 4 driven by the charger.
 void board_set_charge_led(int mode);
+
+// Raw AXP2101 (CoreS3 power chip) readings.
+struct PmicStatus {
+    int battery_mv   = 0;  // ADC, 1 mV
+    int vbus_mv      = 0;  // USB input, 0 without USB
+    int system_mv    = 0;  // VSYS
+    float die_temp_c = 0;
+    int battery_pct  = 0;  // fuel gauge
+    uint8_t status1  = 0;  // reg 0x00: bit 5 VBUS good, bit 3 battery present
+    uint8_t status2  = 0;  // reg 0x01: bits 6:5 01 charging / 10 discharging / 00 idle, bits 2:0 charge phase
+};
+bool board_get_pmic_status(PmicStatus& out);
+// Power key and plug events since the last call (AXP2101 IRQ status 2, reg 0x49, cleared here):
+// bit 2 long press, 3 short press, 4 battery removed, 5 battery inserted, 6 USB removed, 7 USB inserted.
+uint8_t board_take_pmic_events();
 StackChanCamera* board_get_camera();
 int board_get_battery_level();
 bool board_is_battery_charging();
