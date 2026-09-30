@@ -71,33 +71,44 @@ static bool read_file(const std::string& path, std::vector<uint8_t>& out)
 }
 
 // decode_png turns a PNG into LVGL ARGB8888 (B, G, R, A in memory) in PSRAM.
+// LVGL's LodePNG is modified: its "out" is an lv_draw_buf_t holding RGBA rows
+// (LVGL's own decoder swaps red and blue the same way).
 static SpriteLayer::Image decode_png(const std::vector<uint8_t>& png, std::string& error)
 {
-    unsigned char* rgba = nullptr;
+    lv_draw_buf_t* buf = nullptr;
     unsigned w = 0, h = 0;
-    if (unsigned err = lodepng_decode32(&rgba, &w, &h, png.data(), png.size())) {
+    if (unsigned err = lodepng_decode32((unsigned char**)&buf, &w, &h, png.data(), png.size())) {
+        if (buf) {
+            lv_draw_buf_destroy(buf);
+        }
         error = std::string("PNG: ") + lodepng_error_text(err);
         return nullptr;
     }
-    if ((size_t)w * h > _max_pixels) {
-        lv_free(rgba);
+    if (!buf || (size_t)w * h > _max_pixels) {
+        if (buf) {
+            lv_draw_buf_destroy(buf);
+        }
         error = "picture too big (max 640x480)";
         return nullptr;
     }
     const size_t bytes = (size_t)w * h * 4;
     auto* argb         = (uint8_t*)heap_caps_malloc(bytes, MALLOC_CAP_SPIRAM);
     if (!argb) {
-        lv_free(rgba);
+        lv_draw_buf_destroy(buf);
         error = "out of memory";
         return nullptr;
     }
-    for (size_t i = 0; i < bytes; i += 4) {
-        argb[i]     = rgba[i + 2];
-        argb[i + 1] = rgba[i + 1];
-        argb[i + 2] = rgba[i];
-        argb[i + 3] = rgba[i + 3];
+    for (unsigned y = 0; y < h; y++) {
+        const uint8_t* src = buf->data + (size_t)y * buf->header.stride;
+        uint8_t* dst       = argb + (size_t)y * w * 4;
+        for (unsigned x = 0; x < w; x++, src += 4, dst += 4) {
+            dst[0] = src[2];
+            dst[1] = src[1];
+            dst[2] = src[0];
+            dst[3] = src[3];
+        }
     }
-    lv_free(rgba);
+    lv_draw_buf_destroy(buf);
     return std::make_shared<LvglAllocatedImage>(argb, bytes, (int)w, (int)h, (int)w * 4, LV_COLOR_FORMAT_ARGB8888);
 }
 
