@@ -177,6 +177,7 @@ void AppEmbodyMode::onOpen()
     commands.push_back("touch_stream");
     commands.push_back("light_stream");
     commands.push_back("assets");
+    commands.push_back("screen_snapshot");
     commands.push_back("play");
     commands.push_back("play_stop");
     commands.push_back("sprite");
@@ -1029,6 +1030,23 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
     } else if (command == "assets") {
         send_asset_list();
+    } else if (command == "screen_snapshot") {
+        // What the screen shows right now (face, pictures, sprites), as a JPEG snapshot (binary 0x07).
+        uint8_t* jpeg = nullptr;
+        size_t len    = 0;
+        lv_draw_buf_t* snap = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
+        if (snap && image_to_jpeg((uint8_t*)snap->data, snap->data_size, snap->header.w, snap->header.h,
+                                  V4L2_PIX_FMT_RGB565, 70, &jpeg, &len) && jpeg) {
+            if (len <= 65535 && _client) {
+                _client->sendBinary(_bin_snapshot, jpeg, len);
+            }
+            free(jpeg);
+        } else {
+            queue_event("screen_snapshot_failed");
+        }
+        if (snap) {
+            lv_draw_buf_destroy(snap);
+        }
     } else if (command == "sprite") {
         // {"id", "asset", "x", "y" (center), "scale", "angle", "opacity", "z", "hidden", "ms" (move time)}
         const std::string err = _sprite_layer.set(args);
