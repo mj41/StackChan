@@ -100,6 +100,8 @@ private:
 
     // Picture from the phone, shown over the face (below the QR panel)
     lv_obj_t* _picture_obj = nullptr;
+    lv_obj_t* _face_obj    = nullptr;  // the avatar's panel: taps on it and its parts (on_face_input)
+    lv_indev_t* _touch_indev = nullptr;
     std::shared_ptr<LvglAllocatedImage> _picture;
     std::string _picture_asset;  // the shown picture's file ("sent" for a JPEG from the server), "" = the face
     void queue_tap(const char* name, int x, int y);
@@ -315,6 +317,8 @@ private:
     void take_snapshot();
     void queue_event(const char* name, embody::Client::Telemetry data = {}, embody::Client::Texts text = {});
     static void on_screen_event(lv_event_t* e);
+    static void on_face_input(lv_event_t* e);
+    void screen_input(lv_event_code_t code);
     void pause_angle_sync();
     void start_gesture(const GestureStep* steps, size_t count);
     void update_motion();

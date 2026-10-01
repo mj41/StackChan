@@ -421,6 +421,11 @@ void AppEmbodyMode::onClose()
             lv_obj_delete(_blank_screen);
             _blank_screen = nullptr;
         }
+        if (_touch_indev) {
+            lv_indev_remove_event_cb_with_user_data(_touch_indev, on_face_input, this);
+            _touch_indev = nullptr;
+        }
+        _face_obj = nullptr;
         GetStackChan().clearModifiers();
         GetStackChan().resetAvatar();
         if (_live_badge) {
@@ -466,22 +471,48 @@ void AppEmbodyMode::onClose()
 // Runs in the LVGL task, so it only queues.
 void AppEmbodyMode::on_screen_event(lv_event_t* e)
 {
+    static_cast<AppEmbodyMode*>(lv_event_get_user_data(e))->screen_input(lv_event_get_code(e));
+}
+
+// Taps on the face come from the touch input device itself: the face's parts (eyes,
+// mouth, speech bubble, stickers) are LVGL objects that would take a tap on them, and
+// the face would never hear it (e.g. a menu tile drawn over an eye).
+void AppEmbodyMode::on_face_input(lv_event_t* e)
+{
     auto* self = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
     auto code  = lv_event_get_code(e);
+    if (code != LV_EVENT_SHORT_CLICKED && code != LV_EVENT_LONG_PRESSED) {
+        return;
+    }
+    bool onFace = false;  // not a picture or the QR panel: they listen themselves
+    for (lv_obj_t* o = lv_indev_get_active_obj(); o && self->_face_obj; o = lv_obj_get_parent(o)) {
+        if (o == self->_face_obj) {
+            onFace = true;
+            break;
+        }
+    }
+    if (!onFace) {
+        return;
+    }
+    self->screen_input(code);
+    auto* indev = lv_indev_active();
+    if (code == LV_EVENT_SHORT_CLICKED && indev && lv_indev_get_short_click_streak(indev) % 3 == 2) {
+        self->screen_input(LV_EVENT_DOUBLE_CLICKED);  // the input device gets no double click
+    }
+}
+
+void AppEmbodyMode::screen_input(lv_event_code_t code)
+{
+    lv_point_t p{};
+    if (auto* indev = lv_indev_active()) {
+        lv_indev_get_point(indev, &p);
+    }
     if (code == LV_EVENT_LONG_PRESSED) {  // free for apps (the QR screen has its own button)
-        lv_point_t p{};
-        if (auto* indev = lv_indev_active()) {
-            lv_indev_get_point(indev, &p);
-        }
-        self->queue_tap("screen_long_press", p.x, p.y);
+        queue_tap("screen_long_press", p.x, p.y);
     } else if (code == LV_EVENT_DOUBLE_CLICKED) {
-        self->_blank_requested = true;
+        _blank_requested = true;
     } else if (code == LV_EVENT_SHORT_CLICKED) {
-        lv_point_t p{};
-        if (auto* indev = lv_indev_active()) {
-            lv_indev_get_point(indev, &p);
-        }
-        self->queue_tap("screen_tap", p.x, p.y);
+        queue_tap("screen_tap", p.x, p.y);
     }
 }
 
@@ -518,7 +549,15 @@ void AppEmbodyMode::create_view()
     // Face at the bottom, then a picture layer, then the QR panel on top.
     auto avatar = std::make_unique<avatar::DefaultAvatar>();
     avatar->init(lv_screen_active());
-    listen(avatar->getPanel()->get());
+    _face_obj = avatar->getPanel()->get();
+    lv_obj_add_flag(_face_obj, LV_OBJ_FLAG_CLICKABLE);
+    for (lv_indev_t* i = lv_indev_get_next(nullptr); i; i = lv_indev_get_next(i)) {
+        if (lv_indev_get_type(i) == LV_INDEV_TYPE_POINTER) {  // the touch screen
+            _touch_indev = i;
+            lv_indev_add_event_cb(i, on_face_input, LV_EVENT_ALL, this);
+            break;
+        }
+    }
     GetStackChan().attachAvatar(std::move(avatar));
 
     _picture_obj = lv_image_create(lv_screen_active());
