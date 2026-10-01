@@ -46,6 +46,25 @@ int main()
     ring.clear();
     expect(ring.empty(), "clear");
 
+    // fadeOut: a soft cut. Keeps the oldest samples, falling to silence.
+    embody::SampleRing f;
+    f.reserve(100);
+    for (int i = 0; i < 50; i++) {
+        f.push(1000);
+    }
+    f.fadeOut(4);
+    expect(f.size() == 4, "fadeOut keeps 4");
+    int16_t faded[4];
+    f.pop(faded, 4);
+    expect(faded[0] > faded[1] && faded[1] > faded[2] && faded[2] > faded[3] && faded[3] > 0 && faded[0] < 1000,
+           "fadeOut ramps down: " + std::to_string(faded[0]) + " " + std::to_string(faded[3]));
+
+    // mixInto: speech plus a sound, clipped at the 16-bit range.
+    int16_t speech[3] = {1000, 30000, -30000};
+    const int16_t sound[3] = {500, 10000, -10000};
+    embody::mixInto(speech, sound, 3);
+    expect(speech[0] == 1500 && speech[1] == 32767 && speech[2] == -32768, "mixInto adds and clips");
+
     if (g_failures) {
         return 1;
     }

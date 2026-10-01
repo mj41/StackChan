@@ -180,6 +180,7 @@ void AppEmbodyMode::onOpen()
     commands.push_back("screen_snapshot");
     commands.push_back("play");
     commands.push_back("play_stop");
+    commands.push_back("speaker_flush");
     commands.push_back("sprite");
     commands.push_back("sprite_hide");
     commands.push_back("sprite_clear");
@@ -1552,7 +1553,9 @@ void AppEmbodyMode::update_standby()
 
 // Browser audio: sample rate (uint16 LE), then s16le mono. Resampled to the
 // codec rate and queued (at most ~3 s; the oldest audio goes first). Main loop.
-void AppEmbodyMode::queue_speaker_audio(const std::string& payload)
+// queue_speaker_audio resamples a speaker message (uint16 LE rate, s16le mono) to the codec
+// rate into the stream ring, or into the stored-sound ring; the speaker task mixes both.
+void AppEmbodyMode::queue_speaker_audio(const std::string& payload, bool stored)
 {
     auto codec = Board::GetInstance().GetAudioCodec();
     if (!codec || payload.size() < 4) {
@@ -1572,7 +1575,8 @@ void AppEmbodyMode::queue_speaker_audio(const std::string& payload)
     const size_t n_out = (size_t)((uint64_t)n_in * out_rate / in_rate);
     {
         std::lock_guard<std::mutex> lock(_spk_mutex);
-        if (!_spk_samples.reserve((size_t)out_rate * 3)) {  // keeps the newest 3 s
+        auto& ring = stored ? _snd_samples : _spk_samples;
+        if (!ring.reserve((size_t)out_rate * 3)) {  // keeps the newest 3 s
             mclog::tagError(_tag, "speaker: no memory for the buffer");
             return;
         }
@@ -1581,7 +1585,7 @@ void AppEmbodyMode::queue_speaker_audio(const std::string& payload)
             size_t j = (size_t)x;
             float t  = x - j;
             int16_t a = sample(std::min(j, n_in - 1)), b = sample(std::min(j + 1, n_in - 1));
-            _spk_samples.push((int16_t)(a + (b - a) * t));
+            ring.push((int16_t)(a + (b - a) * t));
         }
     }
     _last_activity = GetHAL().millis();  // someone is talking through the robot
@@ -1610,6 +1614,7 @@ void AppEmbodyMode::stop_speaker()
     }
     std::lock_guard<std::mutex> lock(_spk_mutex);
     _spk_samples.clear();
+    _snd_samples.clear();
 }
 
 // Plays queued audio in 20 ms chunks; switches the codec output off after
@@ -1624,11 +1629,18 @@ void AppEmbodyMode::speaker_task(void* arg)
     bool enabled        = false;
     uint32_t idle_since = GetHAL().millis();
 
+    std::vector<int16_t> stored(chunk_len);
     while (self->_spk_running) {
         chunk.resize(chunk_len);
         {
+            // Speech and stored sounds have their own rings and are mixed here: queued
+            // into one they would be chopped into each other (noise).
             std::lock_guard<std::mutex> lock(self->_spk_mutex);
-            chunk.resize(self->_spk_samples.pop(chunk.data(), chunk_len));
+            const size_t ns = self->_spk_samples.pop(chunk.data(), chunk_len);
+            const size_t nf = self->_snd_samples.pop(stored.data(), chunk_len);
+            std::fill(chunk.begin() + ns, chunk.end(), 0);
+            embody::mixInto(chunk.data(), stored.data(), nf);
+            chunk.resize(std::max(ns, nf));
         }
         if (!chunk.empty()) {
             if (!enabled) {
@@ -2105,6 +2117,10 @@ void AppEmbodyMode::connect_server(size_t index)
                          "servo_power", "rotate_s"},
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
+        if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
+            flush_speaker();
+            return;
+        }
         _pending_commands.emplace_back(command, args);
     };
     _client->onBinary = [this](uint8_t type, const std::string& payload) {
@@ -2470,6 +2486,10 @@ static uint32_t le32(const uint8_t* b)
 void AppEmbodyMode::start_sound(const std::string& asset, float gain)
 {
     stop_sound(false);
+    if (auto codec = Board::GetInstance().GetAudioCodec()) {  // the old sound fades out, no click
+        std::lock_guard<std::mutex> lock(_spk_mutex);
+        _snd_samples.fadeOut((size_t)codec->output_sample_rate() / 100);
+    }
     const std::string path = _assets.path(asset);
     FILE* f                = path.empty() ? nullptr : fopen(path.c_str(), "rb");
     auto fail              = [&](const char* reason) {
@@ -2547,7 +2567,7 @@ void AppEmbodyMode::update_sound()
     }
     {
         std::lock_guard<std::mutex> lock(_spk_mutex);
-        if (_spk_samples.size() > (size_t)codec->output_sample_rate() / 2) {
+        if (_snd_samples.size() > (size_t)codec->output_sample_rate() / 2) {
             return;  // half a second is queued: enough
         }
     }
@@ -2571,10 +2591,22 @@ void AppEmbodyMode::update_sound()
         payload.append((const char*)&v, 2);
     }
     if (payload.size() > 2) {
-        queue_speaker_audio(payload);
+        queue_speaker_audio(payload, true);
     }
     _snd_left -= got;
     if (_snd_left == 0 || got < want) {
         stop_sound(true);
     }
+}
+
+// flush_speaker drops the queued speech, fading out over 10 ms (no click): a new line
+// replaces an unfinished one ("speaker_flush", run as soon as it arrives).
+void AppEmbodyMode::flush_speaker()
+{
+    auto codec = Board::GetInstance().GetAudioCodec();
+    if (!codec) {
+        return;
+    }
+    std::lock_guard<std::mutex> lock(_spk_mutex);
+    _spk_samples.fadeOut((size_t)codec->output_sample_rate() / 100);
 }

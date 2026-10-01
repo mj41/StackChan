@@ -56,6 +56,16 @@ public:
         }
     }
 
+    // fadeOut keeps only the oldest keep samples, faded to silence (a cut without a click).
+    void fadeOut(size_t keep)
+    {
+        _size = std::min(_size, keep);
+        for (size_t i = 0; i < _size; i++) {
+            int16_t& s = _buf[(_head + i) % _cap];
+            s          = (int16_t)((int32_t)s * (int32_t)(_size - i) / (int32_t)(_size + 1));
+        }
+    }
+
     // pop moves up to n of the oldest samples to out; returns how many.
     size_t pop(int16_t* out, size_t n)
     {
@@ -74,5 +84,13 @@ private:
     size_t _head  = 0;  // the oldest sample
     size_t _size  = 0;
 };
+
+// mixInto adds src to dst (n samples), clipping at the 16-bit range.
+inline void mixInto(int16_t* dst, const int16_t* src, size_t n)
+{
+    for (size_t i = 0; i < n; i++) {
+        dst[i] = (int16_t)std::clamp<int32_t>((int32_t)dst[i] + src[i], -32768, 32767);
+    }
+}
 
 }  // namespace embody

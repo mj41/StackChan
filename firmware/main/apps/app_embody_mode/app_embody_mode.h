@@ -209,7 +209,8 @@ private:
     // Speaker: browser audio (binary 0x03) is resampled to the codec rate and
     // queued; a task plays it, and the mouth moves while it does.
     std::mutex _spk_mutex;
-    embody::SampleRing _spk_samples;  // 3 s at the codec rate, in PSRAM (sample_ring.h)
+    embody::SampleRing _spk_samples;  // streamed audio (speech): 3 s at the codec rate, in PSRAM
+    embody::SampleRing _snd_samples;  // stored sounds ("play"): mixed with the stream
     std::atomic<bool> _spk_running{false};
     std::atomic<TaskHandle_t> _spk_task{nullptr};  // cleared by the task when it exits
     std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec
@@ -223,6 +224,7 @@ private:
     float _snd_gain = 1.0f;
     void start_sound(const std::string& asset, float gain);
     void stop_sound(bool finished);
+    void flush_speaker();
     void update_sound();
     uint32_t _speaking_until = 0;
 
@@ -324,7 +326,7 @@ private:
     void stop_mic();
     static void mic_task(void* arg);
     void send_mic_audio();
-    void queue_speaker_audio(const std::string& payload);
+    void queue_speaker_audio(const std::string& payload, bool stored = false);
     void stop_speaker();
     static void speaker_task(void* arg);
     void run_leds(const ArduinoJson::JsonDocument& args);
