@@ -220,9 +220,6 @@ void AppEmbodyMode::onOpen()
                 auto z         = GetHAL().getHeadTouchZones();
                 _head_press_ms = GetHAL().millis();
                 queue_event("head_press", {{"z0", (float)z[0]}, {"z1", (float)z[1]}, {"z2", (float)z[2]}});
-                if (TaskHandle_t nfc = _nfc_task) {  // a card held to the head: read it now
-                    xTaskNotifyGive(nfc);
-                }
                 break;
             }
             case HeadPetGesture::Release:
@@ -2358,9 +2355,6 @@ void AppEmbodyMode::stop_nfc()
         return;
     }
     _nfc_running = false;
-    if (TaskHandle_t nfc = _nfc_task) {
-        xTaskNotifyGive(nfc);  // no need to wait for the next poll
-    }
     // The task switches the field off and clears _nfc_task when it exits.
     for (int i = 0; i < 100 && _nfc_task != nullptr; i++) {
         vTaskDelay(pdMS_TO_TICKS(10));
@@ -2384,8 +2378,7 @@ static const char* nfc_tag_type(uint8_t sak)
     }
 }
 
-// Polls four times a second, and at once after a head touch, with the RF field on only
-// while reading. A new tag is
+// Polls twice a second with the RF field on only while reading. A new tag is
 // reported once, with the text of its first NDEF record for Type 2 tags; two
 // missed polls in a row mean it is gone.
 void AppEmbodyMode::nfc_task(void* arg)
@@ -2393,7 +2386,9 @@ void AppEmbodyMode::nfc_task(void* arg)
     auto* self = static_cast<AppEmbodyMode*>(arg);
     auto& nfc  = *self->_nfc;
     std::string present;
-    int misses = 0;
+    int misses        = 0;
+    uint32_t polls    = 0;  // logged every 10 s: is the reader alive?
+    uint32_t reported = GetHAL().millis();
 
     while (self->_nfc_running) {
         ST25R3916::Tag tag;
@@ -2431,8 +2426,15 @@ void AppEmbodyMode::nfc_task(void* arg)
             present.clear();
         }
         nfc.fieldOff();
-        // The next poll in 250 ms, or at once when a head touch wakes us (a card held to it).
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(250));
+        polls++;
+        if (GetHAL().millis() - reported >= 10000) {
+            mclog::tagInfo(_tag, "nfc: {} polls in 10 s, last took {} ms", polls, GetHAL().millis() - start);
+            polls    = 0;
+            reported = GetHAL().millis();
+        }
+        for (int i = 0; i < 50 && self->_nfc_running; i++) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
     self->_nfc_task = nullptr;
     vTaskDelete(nullptr);
