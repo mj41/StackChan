@@ -510,7 +510,10 @@ void AppEmbodyMode::screen_input(lv_event_code_t code)
     if (code == LV_EVENT_LONG_PRESSED) {  // free for apps (the QR screen has its own button)
         queue_tap("screen_long_press", p.x, p.y);
     } else if (code == LV_EVENT_DOUBLE_CLICKED) {
-        _blank_requested = true;
+        embody::SpriteLayer::Hit hit;
+        if (!_sprite_layer.hit(p.x, p.y, hit)) {  // on a button it is two presses (a game, a menu)
+            _blank_requested = true;
+        }
     } else if (code == LV_EVENT_SHORT_CLICKED) {
         queue_tap("screen_tap", p.x, p.y);
     }
