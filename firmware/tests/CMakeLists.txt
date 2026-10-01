@@ -42,3 +42,8 @@ if(EXISTS ${LVGL_DIR}/lvgl.h)
     add_test(NAME sprite_layer_test COMMAND $<TARGET_FILE:sprite_layer_test>)
     set_tests_properties(sprite_layer_test PROPERTIES ENVIRONMENT "SIM_ASSETS=${CMAKE_CURRENT_SOURCE_DIR}/data")
 endif()
+
+add_executable(sample_ring_test sample_ring_test.cpp)
+target_include_directories(sample_ring_test PRIVATE sim/stubs ../main)
+target_compile_features(sample_ring_test PRIVATE cxx_std_17)
+add_test(NAME sample_ring_test COMMAND $<TARGET_FILE:sample_ring_test>)

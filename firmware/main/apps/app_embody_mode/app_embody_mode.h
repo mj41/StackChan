@@ -7,6 +7,7 @@
 #include "embody_client.h"
 #include "asset_store.h"
 #include "sprite_layer.h"
+#include "sample_ring.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
 #include <hal/drivers/IrRemote/ir_remote.h>
@@ -208,7 +209,7 @@ private:
     // Speaker: browser audio (binary 0x03) is resampled to the codec rate and
     // queued; a task plays it, and the mouth moves while it does.
     std::mutex _spk_mutex;
-    std::deque<int16_t> _spk_samples;
+    embody::SampleRing _spk_samples;  // 3 s at the codec rate, in PSRAM (sample_ring.h)
     std::atomic<bool> _spk_running{false};
     std::atomic<TaskHandle_t> _spk_task{nullptr};  // cleared by the task when it exits
     std::atomic<uint32_t> _spk_last_audio{0};      // ms, last chunk written to the codec

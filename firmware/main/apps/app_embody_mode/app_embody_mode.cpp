@@ -1572,16 +1572,16 @@ void AppEmbodyMode::queue_speaker_audio(const std::string& payload)
     const size_t n_out = (size_t)((uint64_t)n_in * out_rate / in_rate);
     {
         std::lock_guard<std::mutex> lock(_spk_mutex);
+        if (!_spk_samples.reserve((size_t)out_rate * 3)) {  // keeps the newest 3 s
+            mclog::tagError(_tag, "speaker: no memory for the buffer");
+            return;
+        }
         for (size_t i = 0; i < n_out; i++) {  // linear interpolation
             float x  = (float)i * in_rate / out_rate;
             size_t j = (size_t)x;
             float t  = x - j;
             int16_t a = sample(std::min(j, n_in - 1)), b = sample(std::min(j + 1, n_in - 1));
-            _spk_samples.push_back((int16_t)(a + (b - a) * t));
-        }
-        const size_t max_samples = (size_t)out_rate * 3;
-        while (_spk_samples.size() > max_samples) {
-            _spk_samples.pop_front();
+            _spk_samples.push((int16_t)(a + (b - a) * t));
         }
     }
     _last_activity = GetHAL().millis();  // someone is talking through the robot
@@ -1625,13 +1625,10 @@ void AppEmbodyMode::speaker_task(void* arg)
     uint32_t idle_since = GetHAL().millis();
 
     while (self->_spk_running) {
-        chunk.clear();
+        chunk.resize(chunk_len);
         {
             std::lock_guard<std::mutex> lock(self->_spk_mutex);
-            while (!self->_spk_samples.empty() && chunk.size() < chunk_len) {
-                chunk.push_back(self->_spk_samples.front());
-                self->_spk_samples.pop_front();
-            }
+            chunk.resize(self->_spk_samples.pop(chunk.data(), chunk_len));
         }
         if (!chunk.empty()) {
             if (!enabled) {
