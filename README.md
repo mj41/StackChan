@@ -1,5 +1,13 @@
 # StackChan Open-Source
 
+> **This fork, branch `mj-remote`,** adds **Embody Mode**: the first launcher app, which
+> makes the robot a light client of a home server (camera, microphone, speaker, every
+> sensor as raw data, and commands), switchable between servers and apps (a remote
+> dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
+> [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md).
+> The servers are `stackchan-server`, `stackchan-pet` and `sbot`; notes and scripts are in
+> `stackchan-mj`. The rest of this page is upstream's.
+
 <img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
 
 Here are StackChan related open-source resources, including source code of the StackChan firmware, remote controller firmware, mobile app (iOS and Android), and server. 

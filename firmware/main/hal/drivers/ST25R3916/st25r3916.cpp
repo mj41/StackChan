@@ -1,5 +1,6 @@
 /*
- * SPDX-FileCopyrightText: 2026 M5Stack Technology CO LTD
+ * SPDX-FileCopyrightText: 2026 Michal Jurosz (mj41)
+ * SPDX-FileCopyrightText: M5Stack Technology CO LTD (the UiFlow2 MicroPython driver this is ported from)
  *
  * SPDX-License-Identifier: MIT
  *

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2026 M5Stack Technology CO LTD
+ * SPDX-FileCopyrightText: 2026 Michal Jurosz (mj41)
  *
  * SPDX-License-Identifier: MIT
  *
