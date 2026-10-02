@@ -1,8 +1,8 @@
 # Setting up a Stack-chan with Embody Mode
 
 **Status:** 2026-10-02. Written while doing it on one M5Stack Stack-chan (CoreS3), from a
-Fedora laptop with podman; the container build (step 4) was tested there, flashing from the
-container (step 5) not yet.
+Fedora laptop with podman; the container build (step 4) and flashing from the container
+(step 5) were tested there.
 
 Embody Mode makes the robot a light client of a server you choose: you see through its
 camera, hear through its microphone, speak through its speaker, read every sensor and
@@ -172,6 +172,7 @@ enable the car.
 | The dashboard shows no robot after pairing | open it with the same host as in the QR code |
 | The browser does not offer the microphone | browsers give it only to HTTPS pages: run the server with `-tls-listen :8766` and open `https://<address>:8766` |
 | After flashing, nothing connects | the robot starts in the launcher: open Embody Mode |
+| Flashing from the container: "Permission denied" or "Write timeout" | `container.sh` passes the port under its own name and without SELinux labels for that run; with your own `podman run`, do the same (`--device /dev/ttyACM1:/dev/ttyACM1 --group-add keep-groups --security-opt label=disable`) |
 | A changed picture or asset does not show | delete `build*/generated_assets.bin` and build again |
 
 ## Security, as it is today

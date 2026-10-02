@@ -53,11 +53,16 @@ case ${1:-build} in
             exit 1
         fi
         dev=$(readlink -f "$port")
-        EXTRA_ARGS=(--device "$dev:/dev/ttyACM0" --group-add keep-groups)
+        # The serial device is root:dialout on the host. Rootless podman keeps your groups
+        # (keep-groups); SELinux (Fedora) would still block a container from opening a
+        # host serial device, so this one run goes without SELinux labels.
+        # Same device name inside: esptool reads the port's USB ids from sysfs by name to
+        # pick the ESP32-S3's USB-JTAG reset; under another name it resets the wrong way.
+        EXTRA_ARGS=(--device "$dev:$dev" --group-add keep-groups --security-opt label=disable)
         if [[ $(basename "$ENGINE") == docker ]]; then
-            EXTRA_ARGS=(--device "$dev:/dev/ttyACM0" --group-add "$(stat -c %g "$dev")")
+            EXTRA_ARGS=(--device "$dev:$dev" --group-add "$(stat -c %g "$dev")")
         fi
-        run idf.py -B "$BUILD_DIR" -p /dev/ttyACM0 flash
+        run idf.py -B "$BUILD_DIR" -p "$dev" flash
         ;;
     menuconfig)
         run idf.py -B "$BUILD_DIR" menuconfig
