@@ -68,3 +68,4 @@ xiaozhi-esp32/
 
 # Local config overlay (may hold secrets)
 sdkconfig.defaults.local
+build-container/

@@ -4,7 +4,8 @@
 > makes the robot a light client of a home server (camera, microphone, speaker, every
 > sensor as raw data, and commands), switchable between servers and apps (a remote
 > dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
-> [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md).
+> [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md),
+> and to set a robot up: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
 > The servers are `stackchan-server`, `stackchan-pet` and `sbot`; notes and scripts are in
 > `stackchan-mj`. The rest of this page is upstream's.
 

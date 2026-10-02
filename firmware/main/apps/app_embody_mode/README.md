@@ -1,5 +1,7 @@
 # Embody Mode
 
+To set up a robot, see [SETUP.md](SETUP.md).
+
 Launcher app (first icon) that lets you control this Stack-chan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The server's readme defines the protocol, and the design lives in `../stackchan-mj/docs/design.md`.
 
 ## On the robot
