@@ -1,6 +1,6 @@
 # StackChan Open-Source
 
-> **This fork, branch `mj-remote`,** adds **Embody Mode**: the first launcher app, which
+> **This fork, branch `embody-mj41`,** adds **Embody Mode**: the first launcher app, which
 > makes the robot a light client of a home server (camera, microphone, speaker, every
 > sensor as raw data, and commands), switchable between servers and apps (a remote
 > dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
