@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "embody_client.h"
+#include <cstring>
 #include <hal/hal.h>
 #include <board.h>
 #include <web_socket.h>
@@ -134,6 +135,9 @@ void Client::connect()
         if (len == 0 || len > 256 * 1024) {
             return;
         }
+        if (!binary && onFastCommand && fast_command(data, len)) {
+            return;
+        }
         std::lock_guard<std::mutex> lock(_mutex);
         _inbox.push({std::string(data, len), esp_timer_get_time(), binary});
     });
@@ -165,6 +169,35 @@ void Client::connect()
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
     send(frame);
+}
+
+// Socket task: handles a "car_*" RobotCommand at once (the app loop can be busy for
+// hundreds of ms with camera frames and drawing). Other frames return false.
+bool Client::fast_command(const char* data, size_t len)
+{
+    static constexpr char key[] = "\"car_";
+    if (!memmem(data, len, key, sizeof key - 1)) {
+        return false;
+    }
+    ArduinoJson::JsonDocument doc;
+    if (ArduinoJson::deserializeJson(doc, data, len) || !doc.is<ArduinoJson::JsonObject>() ||
+        std::string(doc["kind"] | "") != "RobotCommand") {
+        return false;
+    }
+    const std::string command = doc["body"]["command"] | "";
+    if (command.rfind("car_", 0) != 0) {
+        return false;
+    }
+    std::string args = "{}";
+    if (doc["body"]["args"].is<ArduinoJson::JsonObject>()) {
+        args.clear();
+        ArduinoJson::serializeJson(doc["body"]["args"], args);
+    }
+    if (!onFastCommand(command, args)) {
+        return false;
+    }
+    _command_count++;
+    return true;
 }
 
 void Client::handle_frame(const Inbound& in)

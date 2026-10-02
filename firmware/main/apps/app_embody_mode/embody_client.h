@@ -84,6 +84,10 @@ public:
 
     // args is the command's JSON "args" object (or "{}"). "ping" is answered here.
     std::function<void(const std::string& command, const std::string& args)> onCommand;
+    // Commands that must not wait for the app loop (driving the car). Called in the
+    // socket task for "car_*" commands, before onCommand: return true if handled.
+    // It must be thread-safe; anything else goes through onCommand as usual.
+    std::function<bool(const std::string& command, const std::string& args)> onFastCommand;
     std::function<Telemetry()> collectTelemetry;
 
     // Binary messages from the server (e.g. 0x10 picture): type byte, then payload.
@@ -130,7 +134,7 @@ private:
     int _viewers        = 0;
     bool _paired_on_reconnect = false;
     uint32_t _revision  = 0;
-    uint32_t _command_count = 0;
+    std::atomic<uint32_t> _command_count{0};
     bool _announced     = false;  // "Connecting…" shown before the blocking connect
     uint32_t _backoff   = 1000;
     uint32_t _next_try  = 0;
@@ -140,6 +144,7 @@ private:
     void set_state(State state, std::string statusText);
     void connect();
     void schedule_retry(State state, std::string statusText, uint32_t delayMs);
+    bool fast_command(const char* data, size_t len);
     void handle_frame(const Inbound& in);
     bool send(const std::string& frame);
     void send_telemetry();

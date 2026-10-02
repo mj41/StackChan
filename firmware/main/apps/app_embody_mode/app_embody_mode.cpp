@@ -2177,6 +2177,17 @@ void AppEmbodyMode::connect_server(size_t index)
         }
         _pending_commands.emplace_back(command, args);
     };
+    // Driving must not wait for the app loop: car_* commands go straight to BLE from
+    // the socket task (CarBle is thread-safe). car_enable and car_board touch the app
+    // and NVS, so they take the normal path.
+    _client->onFastCommand = [this](const std::string& command, const std::string& args) {
+        if (command == "car_enable" || command == "car_board" || !_car || !_car_enabled) {
+            return false;
+        }
+        ArduinoJson::JsonDocument doc;
+        ArduinoJson::deserializeJson(doc, args);
+        return car_command(command, doc);
+    };
     _client->onBinary = [this](uint8_t type, const std::string& payload) {
         if (type == _bin_show_jpeg) {
             _pending_picture_jpeg = payload;  // decoded in the app loop, shown under the LVGL lock

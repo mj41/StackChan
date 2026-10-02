@@ -196,7 +196,7 @@ private:
 
     // Optional TPBot car over BLE (CONFIG_STACKCHAN_EMBODY_CAR, then car_enable).
     std::unique_ptr<embody::CarBle> _car;
-    bool _car_enabled          = false;
+    std::atomic<bool> _car_enabled{false};  // read by the socket task (car fast path)
     uint8_t _car_board         = 1;  // 0 both, 1 V1, 2 V2 frames
     uint32_t _car_last_tele    = 0;
     bool _car_offline_stopped  = false;
