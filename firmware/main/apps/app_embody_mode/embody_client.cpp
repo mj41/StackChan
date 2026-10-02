@@ -120,7 +120,7 @@ void Client::connect()
         _inbox = {};
     }
 
-    auto url = _config.serverUrl + "/api/workers/connect";
+    auto url = _config.serverUrl + "/api/devices/connect";  // servers before 2026-10-02 know only /api/workers/connect
     mclog::tagInfo(_tag, "connecting to {} as {}", url, _config.robotId);
 
     auto network = Board::GetInstance().GetNetwork();
