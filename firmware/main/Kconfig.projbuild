@@ -1036,7 +1036,7 @@ config STACKCHAN_EMBODY_CAR
     default y
     help
         Compiles in a BLE central that drives an ELECFREAKS TPBot car whose
-        micro:bit runs ../tpbot-ble. It stays off until a server
+        micro:bit runs the tpbot-ble firmware. It stays off until a server
         sends car_enable {"on": true} (stored on the robot): only then does
         BLE start and the robot list the car_* commands and telemetry.
 
