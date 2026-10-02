@@ -1031,6 +1031,15 @@ config STACKCHAN_EMBODY_SCREENSAVER_S
         a touch and reports screensaver_on / screensaver_off events. A touch,
         or a command that changes the screen, returns to the previous view.
 
+config STACKCHAN_EMBODY_CAR
+    bool "Optional TPBot car over BLE (micro:bit with tpbot-ble firmware)"
+    default y
+    help
+        Compiles in a BLE central that drives an ELECFREAKS TPBot car whose
+        micro:bit runs ../tpbot-ble. It stays off until a server
+        sends car_enable {"on": true} (stored on the robot): only then does
+        BLE start and the robot list the car_* commands and telemetry.
+
 config STACKCHAN_EMBODY_ONLY
     bool "Launcher shows only Embody Mode and SETUP"
     default n

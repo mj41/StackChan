@@ -8,6 +8,7 @@
 #include "asset_store.h"
 #include "sprite_layer.h"
 #include "sample_ring.h"
+#include "car_ble.h"
 #include <hal/drivers/ST25R3916/st25r3916.h>
 #include <hal/drivers/LTR553/ltr553.h>
 #include <hal/drivers/IrRemote/ir_remote.h>
@@ -192,6 +193,18 @@ private:
 
     // Infrared (LED on G5, receiver on G10): "ir_send" and "ir_received" events.
     std::unique_ptr<IrRemote> _ir;
+
+    // Optional TPBot car over BLE (CONFIG_STACKCHAN_EMBODY_CAR, then car_enable).
+    std::unique_ptr<embody::CarBle> _car;
+    bool _car_enabled          = false;
+    uint8_t _car_board         = 1;  // 0 both, 1 V1, 2 V2 frames
+    uint32_t _car_last_tele    = 0;
+    bool _car_offline_stopped  = false;
+    std::vector<std::string> _car_measurements;
+    void setup_car_commands(std::vector<std::string>& commands);
+    void update_car();
+    void car_telemetry(embody::Client::Telemetry& t);
+    bool car_command(const std::string& command, const ArduinoJson::JsonDocument& args);
 
     // ESP32-S3 internal temperature sensor, for the chip_temp_c measurement.
     temperature_sensor_handle_t _tsens = nullptr;

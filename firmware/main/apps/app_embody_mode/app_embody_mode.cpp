@@ -196,6 +196,7 @@ void AppEmbodyMode::onOpen()
         commands.push_back("camera_config");
         commands.push_back("camera_reg");
     }
+    setup_car_commands(commands);
 
     _robot_id = robot_id;
     _commands = commands;
@@ -338,6 +339,7 @@ void AppEmbodyMode::onRunning()
     update_light();
     update_ir();
     update_power_events();
+    update_car();
 
     prepare_pictures();  // decode stored pictures before taking the LVGL lock
     LvglLockGuard lock;
@@ -392,6 +394,9 @@ void AppEmbodyMode::onClose()
     stop_nfc();
     stop_rotate();
     stop_hold();
+    if (_car) {
+        _car->stop();  // stops the motors first
+    }
     _touch_streaming = false;
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
@@ -770,6 +775,7 @@ void AppEmbodyMode::render()
 // the servos, so reading the servo bus here is safe.
 void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
 {
+    car_telemetry(t);
     auto round_to = [](float v, float step) { return std::round(v / step) * step; };
 
     ImuSample_t imu;
@@ -891,6 +897,10 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
     if (command != "camera" && command != "mic") {  // those come from the server, not the user
         _last_command      = command;
         _rendered_revision = UINT32_MAX;  // refresh "Last: ..."
+    }
+
+    if (car_command(command, args)) {
+        return;
     }
 
     auto& sc     = GetStackChan();
@@ -2138,14 +2148,7 @@ void AppEmbodyMode::connect_server(size_t index)
         _panel->setHidden(false);
     }
     mclog::tagInfo(_tag, "server {}: {}", _servers[index].name, _servers[index].url);
-    _client = std::make_unique<embody::Client>(embody::Client::Config{
-        .serverUrl = _servers[index].url,
-        .token     = _servers[index].token,
-        .robotId   = _robot_id,
-        .model     = "stackchan-cores3",
-        .firmware  = esp_app_get_description()->version,
-        .commands  = _commands,
-        .measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
+    std::vector<std::string> measurements = {"battery_pct", "charging", "head_yaw_deg", "head_pitch_deg", "wifi_rssi_dbm",
                          "free_heap_kb", "uptime_s", "brightness_pct", "volume_pct", "screensaver",
                          "imu_ax_g", "imu_ay_g", "imu_az_g", "imu_gyro_dps", "yaw_load_pct", "pitch_load_pct",
                          "yaw_temp_c", "pitch_temp_c", "servo_voltage_v", "chip_temp_c", "light_lux",
@@ -2156,7 +2159,16 @@ void AppEmbodyMode::connect_server(size_t index)
                          "pitch_voltage_v", "pitch_pos_raw", "pitch_speed_raw", "pitch_current_raw", "pitch_moving",
                          "head_zone0", "head_zone1", "head_zone2", "mag_x_ut", "mag_y_ut", "mag_z_ut", "mag_raw_x", "mag_raw_y",
                          "mag_raw_z", "mag_rhall", "light_ch0", "light_ch1", "rtc_unix", "system_unix", "pmic_ts_raw",
-                         "servo_power", "rotate_s"},
+                         "servo_power", "rotate_s"};
+    measurements.insert(measurements.end(), _car_measurements.begin(), _car_measurements.end());
+    _client = std::make_unique<embody::Client>(embody::Client::Config{
+        .serverUrl = _servers[index].url,
+        .token     = _servers[index].token,
+        .robotId   = _robot_id,
+        .model     = "stackchan-cores3",
+        .firmware  = esp_app_get_description()->version,
+        .commands  = _commands,
+        .measurements = measurements,
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
@@ -2662,4 +2674,157 @@ void AppEmbodyMode::flush_speaker()
     }
     std::lock_guard<std::mutex> lock(_spk_mutex);
     _spk_samples.fadeOut((size_t)codec->output_sample_rate() / 100);
+}
+
+/* ------------------------------- TPBot car -------------------------------- */
+
+// Optional: a TPBot car whose micro:bit runs ../tpbot-ble firmware, over BLE.
+// Off until car_enable {"on": true}; the setting stays in NVS. The car_* names are
+// the same as tpbot-bridge's (sbot readme, "Car capability"), so a server cannot
+// tell whether the car hangs off this robot or off the bridge.
+
+static constexpr const char* _car_commands[] = {"car_drive", "car_stop", "car_servo", "car_headlights",
+                                                "car_sonar", "car_watchdog", "car_board"};
+
+// (Re)builds the car part of the command list from the stored setting, and starts BLE when on.
+void AppEmbodyMode::setup_car_commands(std::vector<std::string>& commands)
+{
+#if CONFIG_STACKCHAN_EMBODY_CAR
+    commands.erase(std::remove_if(commands.begin(), commands.end(),
+                                  [](const std::string& c) { return c.rfind("car_", 0) == 0; }),
+                   commands.end());
+    Settings settings("embody", false);
+    _car_enabled = settings.GetBool("car_on", false);
+    _car_board   = (uint8_t)std::clamp((int)settings.GetInt("car_board", 1), 0, 2);
+    commands.push_back("car_enable");
+    _car_measurements.clear();
+    if (!_car_enabled) {
+        if (_car) {
+            _car->stop();
+        }
+        return;
+    }
+    for (const char* c : _car_commands) {
+        commands.push_back(c);
+    }
+    _car_measurements = {"car_connected", "car_rssi_dbm", "car_echo_us", "car_line_l", "car_line_r",
+                         "car_btn_a",     "car_btn_b",    "car_left",    "car_right",  "car_watchdog_stop",
+                         "car_uptime_ms", "car_i2c_errors", "car_board"};
+    if (!_car) {
+        _car = std::make_unique<embody::CarBle>();
+    }
+    _car->start(_car_board);
+    mclog::tagInfo(_tag, "car: on (board {}), free internal heap {} KB", _car_board,
+                   heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024);
+#else
+    (void)commands;
+#endif
+}
+
+void AppEmbodyMode::car_telemetry(embody::Client::Telemetry& t)
+{
+    if (!_car || !_car_enabled) {
+        return;
+    }
+    const bool on = _car->connected();
+    t.push_back({"car_connected", on ? 1.0 : 0.0});
+    if (!on) {
+        return;
+    }
+    const auto s = _car->state();
+    t.push_back({"car_rssi_dbm", (double)_car->rssi()});
+    t.push_back({"car_echo_us", (double)s.echo_us});
+    t.push_back({"car_line_l", (double)(s.inputs & 1)});
+    t.push_back({"car_line_r", (double)((s.inputs >> 1) & 1)});
+    t.push_back({"car_btn_a", (double)((s.inputs >> 2) & 1)});
+    t.push_back({"car_btn_b", (double)((s.inputs >> 3) & 1)});
+    t.push_back({"car_left", (double)s.left});
+    t.push_back({"car_right", (double)s.right});
+    t.push_back({"car_watchdog_stop", (double)(s.flags & 1)});
+    t.push_back({"car_uptime_ms", (double)s.ms});
+    t.push_back({"car_i2c_errors", (double)s.i2c_err});
+    t.push_back({"car_board", (double)s.board});
+}
+
+// App loop: link events, the car's state as telemetry (at most every 50 ms), and a
+// stop when the server connection is gone (the micro:bit's watchdog is the backstop).
+void AppEmbodyMode::update_car()
+{
+    if (!_car || !_car_enabled) {
+        return;
+    }
+    for (auto& e : _car->poll()) {
+        queue_event(e.name.c_str(), e.name == "car_disconnected" ? embody::Client::Telemetry{{"reason", (double)e.reason}}
+                                                                 : embody::Client::Telemetry{},
+                    {{"car", e.car}, {"addr", e.addr}});
+    }
+    const bool online = _client && _client->isRegistered();
+    if (!online) {
+        if (!_car_offline_stopped && _car->connected()) {
+            _car->stopMotors();
+        }
+        _car_offline_stopped = true;
+        return;
+    }
+    _car_offline_stopped = false;
+    bool fresh           = false;
+    _car->state(&fresh);  // only peeks at "fresh"; car_telemetry reads the state again
+    const uint32_t now = GetHAL().millis();
+    if (fresh && now - _car_last_tele >= 50) {
+        _car_last_tele = now;
+        embody::Client::Telemetry t;
+        car_telemetry(t);
+        _client->sendTelemetry(t);
+    }
+}
+
+// Returns true when the command was a car command (handled or refused).
+bool AppEmbodyMode::car_command(const std::string& command, const ArduinoJson::JsonDocument& args)
+{
+    if (command.rfind("car_", 0) != 0) {
+        return false;
+    }
+#if CONFIG_STACKCHAN_EMBODY_CAR
+    if (command == "car_enable") {
+        const bool on = args["on"] | false;
+        Settings settings("embody", true);
+        settings.SetBool("car_on", on);
+        if (args["board"].is<const char*>()) {
+            const std::string b = args["board"].as<const char*>();
+            settings.SetInt("car_board", b == "both" ? 0 : b == "v2" ? 2 : 1);
+        }
+        mclog::tagInfo(_tag, "car_enable {}: registering again", on);
+        setup_car_commands(_commands);
+        connect_server(_server_index);  // a new Register with the new command list
+        return true;
+    }
+    if (!_car || !_car_enabled) {
+        return true;
+    }
+    auto& c = *_car;
+    if (command == "car_drive") {
+        c.drive(args["left"] | 0, args["right"] | 0);
+    } else if (command == "car_stop") {
+        c.stopMotors();
+    } else if (command == "car_servo") {
+        c.servo(args["port"] | 1, args["angle"] | 90);
+    } else if (command == "car_headlights") {
+        uint32_t rgb = 0;
+        if (parse_hex_color(args["color"] | "#000000", rgb)) {
+            c.headlights((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        }
+    } else if (command == "car_sonar") {
+        c.sonar(args["hz"] | 10);
+    } else if (command == "car_watchdog") {
+        c.watchdog(args["ms"] | 500);
+    } else if (command == "car_board") {
+        const std::string b = args["board"] | "v1";
+        const uint8_t mode  = b == "both" ? 0 : b == "v2" ? 2 : 1;
+        Settings settings("embody", true);
+        settings.SetInt("car_board", mode);
+        _car_board = mode;
+        c.board(mode);
+    }
+#endif
+    return true;
 }

@@ -240,14 +240,21 @@ bool Client::send(const std::string& frame)
 
 void Client::send_telemetry()
 {
-    if (!collectTelemetry) {
+    if (collectTelemetry) {
+        sendTelemetry(collectTelemetry());
+    }
+}
+
+void Client::sendTelemetry(const Telemetry& t)
+{
+    if (_state != State::Registered) {
         return;
     }
     ArduinoJson::JsonDocument doc;
     doc["kind"] = "RobotTelemetry";
     doc["meta"].to<ArduinoJson::JsonObject>();
     auto measurements = doc["body"]["measurements"].to<ArduinoJson::JsonObject>();
-    for (const auto& [key, value] : collectTelemetry()) {
+    for (const auto& [key, value] : t) {
         measurements[key] = value;
     }
     std::string frame;

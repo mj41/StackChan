@@ -96,6 +96,8 @@ public:
     // numeric data such as {x, y} and text data such as {uid}. Dropped while offline.
     void sendEvent(const std::string& name, const Telemetry& data = {}, const Texts& text = {});
 
+    // Send telemetry now, besides the periodic collectTelemetry (e.g. a car's sensors). Main loop only.
+    void sendTelemetry(const Telemetry& t);
     // Send a binary message (type byte + payload), e.g. a camera frame. Main loop only.
     bool sendBinary(uint8_t type, const uint8_t* data, size_t len);
 
