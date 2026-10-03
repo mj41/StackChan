@@ -19,6 +19,7 @@
 #include <settings.h>
 #include <mooncake.h>
 #include "automation.h"
+#include "usb_setup.h"
 #include <audio_codec.h>
 #include <lvgl_image.h>
 #include <jpg/image_to_jpeg.h>
@@ -386,6 +387,10 @@ void AppEmbodyMode::onRunning()
         _speaking_until = now + 800;
     }
 
+    if (const std::string& pair = _client ? _client->pairUrl() : std::string(); pair != _published_pair) {
+        _published_pair = pair;
+        embody::setPairUrl(pair);
+    }
     if (!_boot_stable && GetHAL().millis() > 60000) {
         _boot_stable = true;
         embody::mark_stable();
@@ -408,6 +413,7 @@ void AppEmbodyMode::onRunning()
 void AppEmbodyMode::onClose()
 {
     mclog::tagInfo(_tag, "on close");
+    embody::setPairUrl("");
 
     stop_mic();
     stop_sound(false);

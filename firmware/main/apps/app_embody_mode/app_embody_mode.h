@@ -150,6 +150,7 @@ private:
     embody::E2E _e2e;
     bool _e2e_ok = false;
     bool _boot_stable = false;  // ran a minute: the boot-loop guard counts from zero again
+    std::string _published_pair;  // the pairing link given to the USB setup ({"op":"pair"})
     std::vector<std::string> _e2e_urls;
     void load_e2e_urls();
     bool is_e2e(const std::string& url) const;

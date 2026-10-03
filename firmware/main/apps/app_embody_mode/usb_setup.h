@@ -5,6 +5,8 @@
  */
 #pragma once
 
+#include <string>
+
 namespace embody {
 
 /**
@@ -20,10 +22,18 @@ namespace embody {
  *    "wifi":{"ssid","password"},"original":{...}}  -> {"ok":true,"applied":[...]}
  *   "servers":[{"name","url","token"},...] adds more at once; "pin":"<url>" makes it the default
  *   {"op":"restart"}                     -> {"ok":true}, then a restart into Embody Mode
+ *   {"op":"pair"}                        -> {"ok":true,"url"}: the pairing link on the robot's screen
  * "original": the firmware the robot had before its first setup (the setup page reads its
  *   identity and saves a backup); stored once (NVS embody/orig_fw), never replaced.
  * Started from main() for the whole uptime: a freshly flashed robot is in the launcher.
  */
 void startUsbSetup();
+
+/**
+ * @brief The pairing link Embody Mode shows now ("" while it has none), for {"op":"pair"}:
+ *        the setup page opens it, so the computer that set the robot up is paired at once.
+ *        Thread-safe: Embody Mode sets it from its loop, the USB task reads it.
+ */
+void setPairUrl(const std::string& url);
 
 }  // namespace embody

@@ -18,10 +18,20 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
+#include <mutex>
 #include <string>
 
 static const char* _tag = "UsbSetup";
 static constexpr const char* _prefix = "@stackchan ";
+
+static std::mutex s_pair_mutex;
+static std::string s_pair_url;
+
+void embody::setPairUrl(const std::string& url)
+{
+    std::lock_guard<std::mutex> lock(s_pair_mutex);
+    s_pair_url = url;
+}
 
 static void reply(const ArduinoJson::JsonDocument& doc)
 {
@@ -156,6 +166,19 @@ static void handle(const std::string& json)
             mclog::tagInfo(_tag, "wifi {} saved", ssid);  // never the password
         }
         res["ok"] = true;
+        return reply(res);
+    }
+    if (op == "pair") {  // the link on the screen: physical access, like reading the QR code
+        std::string url;
+        {
+            std::lock_guard<std::mutex> lock(s_pair_mutex);
+            url = s_pair_url;
+        }
+        if (url.empty()) {
+            return reply_error("no pairing code yet: Embody Mode is not connected to its server");
+        }
+        res["ok"]  = true;
+        res["url"] = url;
         return reply(res);
     }
     if (op == "restart") {
