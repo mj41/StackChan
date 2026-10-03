@@ -28,7 +28,9 @@ cable** (some cables only charge). Optional, for the car: a **micro:bit V2** and
 1. Plug the robot into your computer: the USB-C port **on the robot's head** (the CoreS3).
 2. Open [chan.w42.eu/setup](https://chan.w42.eu/setup) in **Chrome or Edge** (they have Web
    Serial; Firefox and Safari do not) and sign in with GitHub or Google.
-3. Optional: open **Options** and enter your **Wi-Fi** name and password. They go to the robot
+3. Optional: tick **Start Embody Mode when the robot turns on** (off by default; otherwise
+   open it from the launcher), and pick the **App** it starts with when the server offers more
+   than its dashboard. In **Options**, your **Wi-Fi** name and password: they go to the robot
    over the cable, never to the server.
 4. Press **Set up my robot** and pick the **USB JTAG/serial debug unit**.
 
