@@ -206,6 +206,9 @@ private:
     void car_telemetry(embody::Client::Telemetry& t);
     bool car_command(const std::string& command, const ArduinoJson::JsonDocument& args);
 
+    // Optional automation (CONFIG_STACKCHAN_EMBODY_AUTOMATION): autostart, restart, launch.
+    bool automation_command(const std::string& command, const ArduinoJson::JsonDocument& args);
+
     // ESP32-S3 internal temperature sensor, for the chip_temp_c measurement.
     temperature_sensor_handle_t _tsens = nullptr;
 

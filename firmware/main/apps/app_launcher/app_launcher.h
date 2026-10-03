@@ -25,7 +25,10 @@ private:
     std::unique_ptr<setup_workers::StartupWorker> _startup_worker;
     uint32_t _screensaver_timecount = 0;
     bool _startup_checked           = false;
+    bool _boot_app_checked          = false;  // automation: once per boot
+    int _boot_app_id                = -1;     // opened on the first running tick
 
     void create_launcher_view();
+    void check_boot_app();
     void screensaver_update();
 };

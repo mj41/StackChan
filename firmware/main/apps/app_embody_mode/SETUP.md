@@ -165,6 +165,18 @@ enable the car.
    stops before obstacles (sonar, 10 cm by default), and on its own 500 ms after the last
    command if the connection is lost.
 
+## 9. Optional: let a server or an AI agent run the robot
+
+Off by default. Add `CONFIG_STACKCHAN_EMBODY_AUTOMATION=y` to `sdkconfig` (and to
+`sdkconfig.defaults.local`), build and flash. The robot then accepts three more commands from
+its server: `automation {"autostart": true}` (open Embody Mode after every power-on or
+restart; off until set), `restart`, and `launch {"app": "AVATAR"}` (restart into another
+app once). Home in Embody Mode still leaves the robot in the launcher. Details: the
+[Embody Mode README](README.md#configuration).
+
+Anything that can send commands through the server can then restart the robot and keep it in
+Embody Mode, so enable it only with a server you trust.
+
 ## Troubleshooting
 
 | Problem | Try |

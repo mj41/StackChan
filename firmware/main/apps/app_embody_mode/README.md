@@ -65,6 +65,11 @@ Other options in the same menu:
 
 - `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S`: seconds without touch before the screen blanks. Default 60; 0 disables it.
 - `CONFIG_STACKCHAN_EMBODY_ONLY`: the launcher installs only Embody Mode and SETUP, and ignores "start AI.AGENT on boot". Default off.
+- `CONFIG_STACKCHAN_EMBODY_AUTOMATION`: lets a server, or an AI agent through it, run the robot without anyone touching it. **Default off**; without it none of this is compiled in. With it, the robot lists three more commands ([automation.h](automation.h), the launcher's `check_boot_app`):
+  - `automation {"autostart": bool}`: open Embody Mode after every power-on or restart. Stored on the robot and **off until a server sets it**; the robot reports it as the `automation {autostart}` event after it registers.
+  - `restart`: restart the robot, back into Embody Mode (fresh Wi-Fi and connection).
+  - `launch {"app": "<name>"}`: restart into another launcher app once, by its launcher name (`AVATAR`, `AI.AGENT`, `DANCE`, `SETUP`…; `""` = stay in the launcher). An unknown name gives a `launch_unknown {app}` event. A server cannot reach the robot inside another app; a restart (or autostart after a power cycle) brings it back.
+  - Home in Embody Mode still leaves the robot in the launcher: autostart applies only to a power-on or a restart, never to the way back from an app. AI.AGENT's own "start on boot" setting wins over autostart.
 
 ## What it does
 

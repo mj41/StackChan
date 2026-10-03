@@ -17,6 +17,8 @@
 #include <wifi_manager.h>
 #include <board.h>
 #include <settings.h>
+#include <mooncake.h>
+#include "automation.h"
 #include <audio_codec.h>
 #include <lvgl_image.h>
 #include <jpg/image_to_jpeg.h>
@@ -197,6 +199,11 @@ void AppEmbodyMode::onOpen()
         commands.push_back("camera_reg");
     }
     setup_car_commands(commands);
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+    for (const char* c : {"automation", "restart", "launch"}) {
+        commands.push_back(c);
+    }
+#endif
 
     _robot_id = robot_id;
     _commands = commands;
@@ -286,6 +293,9 @@ void AppEmbodyMode::onRunning()
         if (_client->isRegistered() && !_servers_announced) {
             _servers_announced = true;
             announce_servers();
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+            queue_event("automation", {{"autostart", embody::autostart() ? 1.0 : 0.0}});
+#endif
         }
 
         // Using the robot remotely keeps the screensaver away: commands (even ping) and live media.
@@ -899,7 +909,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         _rendered_revision = UINT32_MAX;  // refresh "Last: ..."
     }
 
-    if (car_command(command, args)) {
+    if (car_command(command, args) || automation_command(command, args)) {
         return;
     }
 
@@ -2839,4 +2849,52 @@ bool AppEmbodyMode::car_command(const std::string& command, const ArduinoJson::J
     }
 #endif
     return true;
+}
+
+/* ------------------------------- Automation ------------------------------- */
+
+// Optional (CONFIG_STACKCHAN_EMBODY_AUTOMATION, off by default): lets a server, or an AI
+// agent through it, run the robot without anyone touching it. See automation.h.
+//   automation {"autostart": bool}  open Embody Mode after every power-on or restart
+//   restart                         restart the robot, back into Embody Mode
+//   launch {"app": "<name>"}        restart into another launcher app once ("" = launcher)
+// Returns true when the command was one of these.
+bool AppEmbodyMode::automation_command(const std::string& command, const ArduinoJson::JsonDocument& args)
+{
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+    if (command == "automation") {
+        if (args["autostart"].is<bool>()) {
+            embody::set_autostart(args["autostart"].as<bool>());
+        }
+        const bool on = embody::autostart();
+        mclog::tagInfo(_tag, "automation: autostart {}", on);
+        queue_event("automation", {{"autostart", on ? 1.0 : 0.0}});
+        return true;
+    }
+    if (command == "restart" || command == "launch") {
+        std::string app = command == "restart" ? embody::kEmbodyAppName : (args["app"] | "");
+        if (app.empty() || strcasecmp(app.c_str(), embody::kLauncherName) == 0) {
+            app = embody::kLauncherName;
+        } else {
+            const auto apps = mooncake::GetMooncake().getAllAppProps();
+            const auto it   = std::find_if(apps.begin(), apps.end(), [&](const auto& p) {
+                return strcasecmp(p.info.name.c_str(), app.c_str()) == 0;
+            });
+            if (it == apps.end()) {
+                mclog::tagWarn(_tag, "launch: no app named {}", app);
+                queue_event("launch_unknown", {}, {{"app", app}});
+                return true;
+            }
+            app = it->info.name;
+        }
+        mclog::tagInfo(_tag, "{}: restarting into {}", command, app);
+        embody::set_launch_once(app);
+        GetHAL().delay(300);  // let the log and the socket flush
+        esp_restart();
+    }
+#else
+    (void)command;
+    (void)args;
+#endif
+    return false;
 }

@@ -8,6 +8,8 @@
 #include <mooncake.h>
 #include <mooncake_log.h>
 #include <stackchan/stackchan.h>
+#include <apps/app_embody_mode/automation.h>
+#include <strings.h>
 #include <cstdint>
 
 using namespace mooncake;
@@ -46,6 +48,12 @@ void AppLauncher::onLauncherRunning()
             create_launcher_view();
         }
     } else {
+        if (_boot_app_id >= 0) {
+            const int id = _boot_app_id;
+            _boot_app_id = -1;
+            openApp(id);
+            return;
+        }
         _view->update();
         screensaver_update();
     }
@@ -67,8 +75,31 @@ void AppLauncher::onLauncherDestroy()
     mclog::tagInfo(getAppInfo().name, "on close");
 }
 
+// Optional automation (CONFIG_STACKCHAN_EMBODY_AUTOMATION): the app to open by itself
+// after a boot. Must run before the view reads and clears the warm-reboot target.
+void AppLauncher::check_boot_app()
+{
+    if (_boot_app_checked) {
+        return;
+    }
+    _boot_app_checked   = true;
+    const auto boot_app = embody::take_boot_app(GetHAL().getWarmRebootTarget() >= 0);
+    if (boot_app.empty()) {
+        return;
+    }
+    for (const auto& props : getAppProps()) {
+        if (strcasecmp(props.info.name.c_str(), boot_app.c_str()) == 0) {
+            mclog::tagInfo(getAppInfo().name, "automation: opening {}", props.info.name);
+            _boot_app_id = props.appID;
+            return;
+        }
+    }
+    mclog::tagWarn(getAppInfo().name, "automation: no app named {}", boot_app);
+}
+
 void AppLauncher::create_launcher_view()
 {
+    check_boot_app();
     _view = std::make_unique<view::LauncherView>();
     _view->init(getAppProps());
     _view->onAppClicked = [&](int appID) {

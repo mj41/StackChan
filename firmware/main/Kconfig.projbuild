@@ -1047,6 +1047,22 @@ config STACKCHAN_EMBODY_ONLY
         Installs only Embody Mode and SETUP, and ignores the
         "start AI.AGENT on boot" setting. For robots used only remotely.
 
+config STACKCHAN_EMBODY_AUTOMATION
+    bool "Let servers automate the robot (start Embody Mode on boot, restart, open apps)"
+    default n
+    help
+        Off by default. When on, Embody Mode lists three more commands, so a
+        server, or an AI agent through it, can run the robot without anyone
+        touching it:
+          automation {"autostart": bool}: open Embody Mode after every
+            power-on or restart (stored on the robot, off until a server
+            sets it);
+          restart: restart the robot, back into Embody Mode;
+          launch {"app": "<name>"}: restart into another launcher app once,
+            e.g. "AVATAR" or "DANCE" ("" = stay in the launcher).
+        Home in Embody Mode still leaves the robot in the launcher. AI.AGENT's
+        own "start on boot" setting wins over autostart.
+
 endmenu
 
 menu "StackChan firmware updates"
