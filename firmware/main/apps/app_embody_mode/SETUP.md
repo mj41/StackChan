@@ -41,6 +41,15 @@ go run ./cmd/stackchan-server
 - More options (HTTPS for the browser's microphone, state file, offering other servers):
   the server's readme, [Run](https://github.com/mj41/stackchan-server#run).
 
+**Or use the public server [chan.w42.eu](https://chan.w42.eu)** instead of running your
+own: ask for an **invite token** for your robot in
+[home-w42-eu's issues](https://github.com/mj41/home-w42-eu/issues), with your robot's id.
+The id is `stackchan-` and the robot's Wi-Fi MAC address in lowercase without colons, e.g.
+`stackchan-0a1b2c3d4e50`; the firmware also logs it at start ("connecting to … as
+stackchan-…", `idf.py monitor`). In step 3 use `wss://chan.w42.eu` and the invite token. The
+token works only for your robot; keep it private. Everything streams through that server
+(a proof of concept, not reviewed), so keep private things on your own server.
+
 ## 3. Configure the firmware
 
 Create `StackChan/firmware/sdkconfig.defaults.local` (it is gitignored, because it holds
