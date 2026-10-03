@@ -41,15 +41,25 @@ and **Back to app** returns to the face.
 
 ## Servers
 
-The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
+The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
 - **On the robot:** the QR screen's top row is `Pin  name n/m  Next ▶`, with a wide `✕ Close` at the bottom right. **Next** switches to the next server (the robot reconnects and shows that server's QR; the QR screen stays open), **Pin** makes the shown one the **default** used at start (blue), and tapping Pin on the default **unpins** it. With no default, Embody Mode starts as a **chooser**: it contacts nothing, Next browses, and the bottom-right button reads **Connect**.
 - **Swipe-up bar:** next to Home, **QR** opens the QR screen; while it is open the button reads **APP** and goes back to the app.
 - **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
 
+## Setup over USB
+
+A computer writes a server, its token, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `stackchan-usb` from [stackchan-server](https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
+
+- `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, and whether automation is built in.
+- `{"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,"wifi":{"ssid","password"}}` → the server is added to the list (origin "added") and made the default; every part is optional.
+- `{"op":"restart"}` → a restart into Embody Mode.
+
+So nobody needs to build firmware for a token: the **release build** (`./container.sh release`, or an `embody-v*` release built by CI) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
+
 ## Configuration
 
-The Kconfig menu "Embody Mode" (`main/Kconfig.projbuild`) has two options, both set in `firmware/sdkconfig.defaults.local`. That file is gitignored because it holds the token:
+For your own builds, the Kconfig menu "Embody Mode" (`main/Kconfig.projbuild`) has a built-in server, set in `firmware/sdkconfig.defaults.local`. That file is gitignored because it holds the token; leave both empty to set the robot up over USB instead. The release build never reads that file (`sdkconfig.defaults.release`):
 
 ```
 CONFIG_STACKCHAN_EMBODY_SERVER_URL="ws://192.168.1.10:8765"   # or wss://chan.w42.eu
@@ -65,7 +75,7 @@ Other options in the same menu:
 
 - `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S`: seconds without touch before the screen blanks. Default 60; 0 disables it.
 - `CONFIG_STACKCHAN_EMBODY_ONLY`: the launcher installs only Embody Mode and SETUP, and ignores "start AI.AGENT on boot". Default off.
-- `CONFIG_STACKCHAN_EMBODY_AUTOMATION`: lets a server, or an AI agent through it, run the robot without anyone touching it. **Default off**; without it none of this is compiled in. With it, the robot lists three more commands ([automation.h](automation.h), the launcher's `check_boot_app`):
+- `CONFIG_STACKCHAN_EMBODY_AUTOMATION`: lets a server, or an AI agent through it, run the robot without anyone touching it. **Default off** in your own builds; without it none of this is compiled in. **On in the release build**, so the setup over USB can turn autostart on. With it, the robot lists three more commands ([automation.h](automation.h), the launcher's `check_boot_app`):
   - `automation {"autostart": bool}`: open Embody Mode after every power-on or restart. Stored on the robot and **off until a server sets it**; the robot reports it as the `automation {autostart}` event after it registers.
   - `restart`: restart the robot, back into Embody Mode (fresh Wi-Fi and connection).
   - `launch {"app": "<name>"}`: restart into another launcher app once, by its launcher name (`AVATAR`, `AI.AGENT`, `DANCE`, `SETUP`…; `""` = stay in the launcher). An unknown name gives a `launch_unknown {app}` event. A server cannot reach the robot inside another app; a restart (or autostart after a power cycle) brings it back.

@@ -5,7 +5,8 @@
 > sensor as raw data, and commands), switchable between servers and apps (a remote
 > dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
 > [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md),
-> and to set a robot up: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
+> and to set a robot up: one click in Chrome at [chan.w42.eu/setup](https://chan.w42.eu/setup), or your own
+> server or build: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
 > The servers are [stackchan-server](https://github.com/mj41/stackchan-server), [stackchan-pet](https://github.com/mj41/stackchan-pet)
 > and [sbot](https://github.com/mj41/sbot); the car's micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble); notes and scripts
 > are in [stackchan-mj](https://github.com/mj41/stackchan-mj). All of them are part of
