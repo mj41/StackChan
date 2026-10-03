@@ -17,7 +17,7 @@ privacy first platform for a home.
 - An **M5Stack Stackchan** robot with its CoreS3 (ESP32-S3), and a **USB-C data cable** (some
   cables only charge).
 - A computer with **podman** or **docker** (or a local ESP-IDF 5.5.4, see step 4).
-- **Go 1.25 or newer** for the server, on a machine in the same network as the robot.
+- **Go 1.26 or newer** for the server, on a machine in the same network as the robot.
 - Optional, for the car: a **micro:bit V2** and an **ELECFREAKS TPBot** (step 8).
 
 ## 1. Get the code
@@ -42,12 +42,12 @@ go run ./cmd/stackchan-server
   the server's readme, [Run](https://github.com/mj41/stackchan-server#run).
 
 **Or use the public server [chan.w42.eu](https://chan.w42.eu)** instead of running your
-own: ask for an **invite token** for your robot in
-[home-w42-eu's issues](https://github.com/mj41/home-w42-eu/issues), with your robot's id.
-The id is `stackchan-` and the robot's Wi-Fi MAC address in lowercase without colons, e.g.
-`stackchan-0a1b2c3d4e50`; the firmware also logs it at start ("connecting to … as
-stackchan-…", `idf.py monitor`). In step 3 use `wss://chan.w42.eu` and the invite token. The
-token works only for your robot; keep it private. Everything streams through that server
+own: open [chan.w42.eu/robots](https://chan.w42.eu/robots), sign in with GitHub or Google,
+and add your robot by its id. The id is `stackchan-` and the robot's Wi-Fi MAC address in
+lowercase without colons, e.g. `stackchan-0a1b2c3d4e50`; the firmware also logs it at start
+("connecting to … as stackchan-…", `idf.py monitor`). The page shows the two lines for step 3
+(`wss://chan.w42.eu` and your robot's own token) once. The token works only for your robot;
+keep it private. Everything streams through that server
 (a proof of concept, not reviewed), so keep private things on your own server.
 
 ## 3. Configure the firmware
