@@ -21,8 +21,9 @@ fi
 export SOURCE_DATE_EPOCH
 echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH (version $version)"
 
-# The configuration comes only from the defaults files: never from an earlier sdkconfig.
-rm -f build-release/sdkconfig
+# A clean build every time, as in CI: the configuration only from the defaults files, and every
+# object compiled with this commit's SOURCE_DATE_EPOCH (an incremental build keeps old ones).
+rm -rf build-release
 idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build
 

@@ -345,3 +345,28 @@ index 7cd7ba0..b720a23 100644
  
      // Display control
  #ifdef HAVE_LVGL
+diff --git a/scripts/build_default_assets.py b/scripts/build_default_assets.py
+index 9ca1464..2a3edcb 100755
+--- a/scripts/build_default_assets.py
++++ b/scripts/build_default_assets.py
+@@ -19,6 +19,20 @@ import json
+ import struct
+ from datetime import datetime
+ 
++# Reproducible builds: walk directories in name order, not in the filesystem's order, so the
++# same files give the same assets image on every machine (srmodels.bin, index.json).
++_os_walk = os.walk
++
++
++def _sorted_walk(top, *args, **kwargs):
++    for root, dirs, files in _os_walk(top, *args, **kwargs):
++        dirs.sort()
++        files.sort()
++        yield root, dirs, files
++
++
++os.walk = _sorted_walk
++
+ 
+ # =============================================================================
+ # Pack model functions (from pack_model.py)
