@@ -4,6 +4,14 @@ To set up a robot, see [SETUP.md](SETUP.md).
 
 Launcher app (first icon) that lets you control this Stack-chan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj. Setting up a robot: [SETUP.md](SETUP.md).
 
+| The face, while a browser drives it | The QR screen: scan to pair, or type the code |
+|---|---|
+| ![Embody Mode: the robot's face with a speech bubble](screenshots/face.jpg) | ![Embody Mode: the QR screen with the pairing code](screenshots/qr-screen.jpg) |
+
+Both are the robot's own screen (320x240), taken with the `screen_snapshot` command. On
+the QR screen, **Next** browses the robot's servers, **Pin** makes this one the default,
+and **Back to app** returns to the face.
+
 ## On the robot
 
 1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to `CONFIG_STACKCHAN_EMBODY_SERVER_URL`.
