@@ -16,7 +16,7 @@ There are three ways, from one click to your own firmware:
 | Way | For | What it takes |
 |---|---|---|
 | [A. One click on chan.w42.eu](#a-one-click-on-chanw42eu) | everyone | Chrome or Edge, a GitHub or Google account |
-| [B. Your own server](#b-your-own-server) | your home network, private things | the same, plus Go 1.26 on a computer at home |
+| [B. Your own server](#b-your-own-server) | your home network, private things | Go 1.26 on a computer at home, Chrome or Edge |
 | [C. Build the firmware yourself](#c-build-the-firmware-yourself) | developers, changes to the firmware | podman or docker (or ESP-IDF 5.5.4) |
 
 All of them need an **M5Stack Stackchan** robot with its CoreS3 (ESP32-S3) and a **USB-C data
@@ -64,15 +64,18 @@ things on your own server (B).
    - More options (HTTPS for the browser's microphone, state file, offering other servers):
      the server's readme, [Run](https://github.com/mj41/stackchan-server#run).
 
-2. **Set the robot up** as in A, at [chan.w42.eu/setup](https://chan.w42.eu/setup), but in
-   **Options** choose **Server: My own server** and enter its URL with `ws://` (e.g.
-   `ws://192.168.1.10:8765`) and the content of the robot-token file. No sign-in is needed
-   then; the URL and the token go only to the robot, over the cable.
+2. **Set the robot up** from the same computer: plug the robot in, open
+   `http://localhost:8765/setup` in Chrome or Edge and press **Set up my robot**. The server
+   fills in its address, its robot token and this computer's Wi-Fi, and installs the official
+   firmware (it fetches the release from GitHub). Nothing to type.
 
-   - To keep everything at home, serve the page yourself: start the server with
-     `-firmware-dir <dir>` holding the files of an official `embody-v*` release of
-     [mj41/StackChan](https://github.com/mj41/StackChan/releases) and open `http://localhost:8765/setup` on that computer (Web Serial needs
-     `localhost` or HTTPS).
+   - **From another computer:** on the server's computer, press **Copy setup for another
+     computer** on that page, and paste it on the other computer's setup page (Options → Server →
+     My own server), e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup) (signed in, to install
+     the firmware there). It holds the robot
+     token and the Wi-Fi password: keep it private.
+   - The robot must reach the server's address: by default `ws://<LAN IP>:8765`; set another
+     with `-public-url`.
    - Or, on a robot that already has Embody Mode, from a terminal:
      `go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
      then `go run ./cmd/stackchan-usb restart` (the server's readme,
