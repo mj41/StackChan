@@ -101,8 +101,11 @@ void AppEmbodyMode::onOpen()
 {
     mclog::tagInfo(_tag, "on open");
 
-    const std::string server_url = CONFIG_STACKCHAN_EMBODY_SERVER_URL;
-    if (!server_url.empty()) {
+    // The server list first: the release build has no built-in server, so the robot is set
+    // up when its settings hold one (written over USB, offered or added).
+    load_servers();
+    const bool set_up = _servers.size() > 1 || !_servers[0].url.empty();
+    if (set_up) {
         std::unique_ptr<view::LoadingPage> loading_page;
         {
             LvglLockGuard lock;
@@ -123,9 +126,10 @@ void AppEmbodyMode::onOpen()
         create_view();
     }
 
-    if (server_url.empty()) {
+    if (!set_up) {  // nothing to contact: no Wi-Fi, no hotspot, only how to set it up
+        mclog::tagInfo(_tag, "not set up: connect over USB at chan.w42.eu/setup");
         LvglLockGuard lock;
-        _status->setText("Set CONFIG_STACKCHAN_EMBODY_SERVER_URL in sdkconfig.defaults.local");
+        _status->setText("Not set up yet: plug me into a computer and open chan.w42.eu/setup in Chrome");
         return;
     }
 
@@ -382,6 +386,10 @@ void AppEmbodyMode::onRunning()
         _speaking_until = now + 800;
     }
 
+    if (!_boot_stable && GetHAL().millis() > 60000) {
+        _boot_stable = true;
+        embody::mark_stable();
+    }
     render_server_row();
     update_motion();
     update_hold();
@@ -2108,12 +2116,13 @@ void AppEmbodyMode::announce_servers()
     }
     std::string list;
     ArduinoJson::serializeJson(doc, list);
-    queue_event("servers", {}, {{"list", list}, {"current", _servers[_server_index].url}, {"default", _default_url}});
+    queue_event("servers", {}, {{"list", list}, {"current", _servers.empty() ? "" : _servers[_server_index].url},
+                                {"default", _default_url}});
 }
 
 void AppEmbodyMode::render_server_row()
 {
-    if (!_title || _servers_rev == _rendered_servers_rev) {
+    if (!_title || _servers.empty() || _servers_rev == _rendered_servers_rev) {
         return;
     }
     _rendered_servers_rev = _servers_rev;
@@ -2144,6 +2153,9 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
 // (Re)connects to _servers[index]: a fresh client with that URL and token.
 void AppEmbodyMode::connect_server(size_t index)
 {
+    if (_servers.empty()) {
+        return;
+    }
     index = std::min(index, _servers.size() - 1);
     if (_servers[index].url.empty()) {  // the release build's empty built-in entry: nothing to contact
         mclog::tagInfo(_tag, "not set up: connect over USB at chan.w42.eu/setup");

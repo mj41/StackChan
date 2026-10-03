@@ -89,6 +89,13 @@ static void handle(const std::string& json)
         res["model"]      = "stackchan-cores3";
         res["firmware"]   = esp_app_get_description()->version;
         res["protocol"]   = 1;
+        {
+            Settings settings("embody", false);
+            ArduinoJson::JsonDocument original;
+            if (!ArduinoJson::deserializeJson(original, settings.GetString("orig_fw", ""))) {
+                res["original"] = original;  // the firmware it had before the first setup
+            }
+        }
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
         res["automation"] = true;
 #else
@@ -98,6 +105,19 @@ static void handle(const std::string& json)
     }
     if (op == "provision") {
         auto applied = res["applied"].to<ArduinoJson::JsonArray>();
+        // The firmware the robot had before the first setup (identity and backup hash):
+        // kept once, never replaced, so it can always be restored from its backup.
+        if (req["original"].is<ArduinoJson::JsonObject>()) {
+            Settings settings("embody", true);
+            if (settings.GetString("orig_fw", "").empty()) {
+                std::string json;
+                ArduinoJson::serializeJson(req["original"], json);
+                if (json.size() <= 1024) {
+                    settings.SetString("orig_fw", json);
+                    applied.add("original");
+                }
+            }
+        }
         if (req["server"].is<ArduinoJson::JsonObject>()) {
             if (!save_server(req["server"]["name"] | "", req["server"]["url"] | "", req["server"]["token"] | "",
                              req["default"] | false)) {

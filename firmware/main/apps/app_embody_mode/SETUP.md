@@ -32,8 +32,10 @@ cable** (some cables only charge). Optional, for the car: a **micro:bit V2** and
    over the cable, never to the server.
 4. Press **Set up my robot** and pick the **USB JTAG/serial debug unit**.
 
-The page installs the latest Embody Mode firmware, adds the robot to your account with its
-own token, writes the server, the token and the Wi-Fi into the robot, and restarts it into
+The first time, the page saves a **backup of the robot's current firmware** to your computer
+(about a minute; keep the file private, it holds the robot's old settings too). With it, Options →
+Firmware → **Restore the original firmware** puts the robot back as it was. Then it installs the
+latest Embody Mode firmware, adds the robot to your account with its own token, writes the server, the token and the Wi-Fi into the robot, and restarts it into
 Embody Mode. It takes about two minutes. Then:
 
 - The robot connects to chan.w42.eu. It is **private**: only you, signed in, see it. Open
@@ -265,6 +267,7 @@ Embody Mode, so use it only with a server you trust.
 | The setup page: "The robot did not answer" | press the robot's reset button and try again; with "Keep the robot's firmware", the robot needs firmware with setup over USB (2026-10 or newer) |
 | Flashing stops halfway | put the robot into flashing mode by hand (hold the reset button until the green LED lights up) and press the button again |
 | The robot stays on "Connecting" | the server URL and token (for built-in ones: in `sdkconfig`, not only in `sdkconfig.defaults.local`), the firewall, the same network |
+| The robot keeps restarting | after 3 crashes in a row it stops opening Embody Mode by itself and stays in the launcher; report the crash (`idf.py monitor` shows it) and restore the original firmware or install again |
 | Embody Mode says "Set up: chan.w42.eu/setup" | release firmware with no server yet: set it up over USB (A or B) |
 | Pairing says the code is invalid | scan again: codes are one-time and expire after 5 minutes |
 | The dashboard shows no robot after pairing | open it with the same host as in the QR code |

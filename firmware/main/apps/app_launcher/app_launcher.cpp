@@ -85,6 +85,10 @@ void AppLauncher::check_boot_app()
     _boot_app_checked   = true;
     const auto boot_app = embody::take_boot_app(GetHAL().getWarmRebootTarget() >= 0);
     if (boot_app.empty()) {
+        if (embody::crash_restarts() >= embody::kMaxCrashRestarts) {
+            mclog::tagWarn(getAppInfo().name, "automation: {} crashes in a row, staying in the launcher",
+                           embody::crash_restarts());
+        }
         return;
     }
     for (const auto& props : getAppProps()) {

@@ -149,6 +149,7 @@ private:
     // End-to-end encryption (e2e.h), per server: on for the URLs in _e2e_urls (NVS).
     embody::E2E _e2e;
     bool _e2e_ok = false;
+    bool _boot_stable = false;  // ran a minute: the boot-loop guard counts from zero again
     std::vector<std::string> _e2e_urls;
     void load_e2e_urls();
     bool is_e2e(const std::string& url) const;

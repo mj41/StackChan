@@ -9,6 +9,7 @@
 #include <mooncake.h>
 #include <apps/apps.h>
 #include <apps/app_embody_mode/usb_setup.h>
+#include <apps/app_embody_mode/automation.h>
 #include <hal/hal.h>
 #include <sdkconfig.h>
 
@@ -25,6 +26,7 @@ extern "C" void app_main(void)
     GetHAL().init();
 
     // Setup over the USB cable (chan.w42.eu/setup, stackchan-usb): server, token, Wi-Fi.
+    embody::note_boot();  // before the launcher reads the boot app
     embody::startUsbSetup();
 
     // Setup ui hal

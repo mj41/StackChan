@@ -14,10 +14,13 @@ namespace embody {
  *        token. Physical access is the proof of ownership, like the QR code.
  *
  * Lines on the USB serial port, each "@stackchan <JSON>\n"; anything else (logs) is ignored:
- *   {"op":"hello"}                       -> {"ok":true,"id","model","firmware","protocol":1,"automation"}
+ *   {"op":"hello"}                       -> {"ok":true,"id","model","firmware","protocol":1,"automation",
+ *                                            "original"?}
  *   {"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,
- *    "wifi":{"ssid","password"}}         -> {"ok":true,"applied":[...]}
+ *    "wifi":{"ssid","password"},"original":{...}}  -> {"ok":true,"applied":[...]}
  *   {"op":"restart"}                     -> {"ok":true}, then a restart into Embody Mode
+ * "original": the firmware the robot had before its first setup (the setup page reads its
+ *   identity and saves a backup); stored once (NVS embody/orig_fw), never replaced.
  * Started from main() for the whole uptime: a freshly flashed robot is in the launcher.
  */
 void startUsbSetup();

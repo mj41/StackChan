@@ -54,6 +54,7 @@ A computer writes a server, its token, autostart and Wi-Fi into the robot's sett
 - `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, and whether automation is built in.
 - `{"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,"wifi":{"ssid","password"}}` → the server is added to the list (origin "added") and made the default; every part is optional.
 - `{"op":"restart"}` → a restart into Embody Mode.
+- `"original"` in `provision`: the firmware the robot had before its first setup (identity and the SHA-256 of the backup the setup page saved), stored once in NVS (`embody/orig_fw`) and never replaced; `hello` returns it, so the page restores only that backup.
 
 So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
 
@@ -80,6 +81,7 @@ Other options in the same menu:
   - `restart`: restart the robot, back into Embody Mode (fresh Wi-Fi and connection).
   - `launch {"app": "<name>"}`: restart into another launcher app once, by its launcher name (`AVATAR`, `AI.AGENT`, `DANCE`, `SETUP`…; `""` = stay in the launcher). An unknown name gives a `launch_unknown {app}` event. A server cannot reach the robot inside another app; a restart (or autostart after a power cycle) brings it back.
   - Home in Embody Mode still leaves the robot in the launcher: autostart applies only to a power-on or a restart, never to the way back from an app. AI.AGENT's own "start on boot" setting wins over autostart.
+  - **Boot-loop guard** ([boot_guard.cpp](boot_guard.cpp)): crash restarts in a row (panic, watchdog) are counted in RTC memory; after 3, neither autostart nor a one-time launch opens an app, and the robot stays in the launcher. A normal boot, or a minute in Embody Mode, counts from zero again.
 
 ## What it does
 
