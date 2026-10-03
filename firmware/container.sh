@@ -68,7 +68,8 @@ case ${1:-build} in
     release)
         # The official image, as the release workflow builds it (release.sh).
         need_deps
-        run ./release.sh "$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)"  # git sees the repo only here
+        EXTRA_ARGS=(-e "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)")  # git sees the repo only here
+        run ./release.sh "$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)"
         ;;
     menuconfig)
         run idf.py -B "$BUILD_DIR" menuconfig

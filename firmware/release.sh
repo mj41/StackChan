@@ -11,7 +11,12 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 version=${1:-$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)}
 version=${version#embody-}
+# __DATE__ and __TIME__ (e.g. mooncake's banner) from the commit, not the clock: the same
+# source gives the same bytes. ./container.sh passes it in (git sees the repo only outside).
+export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)}
 
+# The configuration comes only from the defaults files: never from an earlier sdkconfig.
+rm -f build-release/sdkconfig
 idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build
 

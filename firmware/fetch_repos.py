@@ -15,6 +15,13 @@ def clone_or_update_repo(
 
     if ref:
         subprocess.run(["git", "-C", path, "checkout", ref], check=True)
+        # A pinned commit (40 hex digits) must be exactly what is checked out: reproducible builds
+        if len(ref) == 40 and all(c in "0123456789abcdef" for c in ref):
+            head = subprocess.run(
+                ["git", "-C", path, "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+            ).stdout.strip()
+            if head != ref:
+                raise SystemExit(f"{path}: checked out {head}, expected {ref}")
 
     if with_submodules:
         subprocess.run(

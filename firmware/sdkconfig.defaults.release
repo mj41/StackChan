@@ -4,3 +4,6 @@
 CONFIG_STACKCHAN_EMBODY_SERVER_URL=""
 CONFIG_STACKCHAN_EMBODY_TOKEN=""
 CONFIG_STACKCHAN_EMBODY_AUTOMATION=y
+# Reproducible: no build paths, dates or times in the image (release.sh also sets
+# SOURCE_DATE_EPOCH for sources that use __DATE__/__TIME__ themselves).
+CONFIG_APP_REPRODUCIBLE_BUILD=y
