@@ -19,7 +19,8 @@ class WebSocket;
 namespace embody {
 
 /**
- * @brief WebSocket client for stackchan-server (../stackchan-server).
+ * @brief WebSocket client for an Embody Mode server, e.g. stackchan-server
+ *        (https://github.com/mj41/stackchan-server).
  *
  * Frames are JSON {kind, meta, body}; see the protocol table in the server's
  * readme.md. Driven from the app loop: update() may block while connecting.

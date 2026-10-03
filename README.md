@@ -6,8 +6,11 @@
 > dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
 > [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md),
 > and to set a robot up: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
-> The servers are `stackchan-server`, `stackchan-pet` and `sbot`; notes and scripts are in
-> `stackchan-mj`. The rest of this page is upstream's.
+> The servers are [stackchan-server](https://github.com/mj41/stackchan-server), [stackchan-pet](https://github.com/mj41/stackchan-pet)
+> and [sbot](https://github.com/mj41/sbot); the car's micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble); notes and scripts
+> are in [stackchan-mj](https://github.com/mj41/stackchan-mj). All of them are part of
+> [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home.
+> The rest of this page is upstream's.
 
 <img src="https://m5stack-doc.oss-cn-shenzhen.aliyuncs.com/1205/K151_stack_chan_main_pictures_01.webp" width="60%">
 

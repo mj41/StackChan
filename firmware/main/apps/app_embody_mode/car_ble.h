@@ -14,7 +14,8 @@ struct ble_gap_event;
 namespace embody {
 
 /**
- * @brief Optional TPBot car: a micro:bit V2 running ../tpbot-ble firmware,
+ * @brief Optional TPBot car: a micro:bit V2 running the tpbot-ble firmware
+ *        (https://github.com/mj41/tpbot-ble),
  * reached over BLE (NimBLE central).
  *
  * The protocol (service, command opcodes, the 14-byte state) is tpbot-ble's

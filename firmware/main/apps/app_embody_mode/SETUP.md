@@ -7,8 +7,10 @@ Fedora laptop with podman; the container build (step 4) and flashing from the co
 Embody Mode makes the robot a light client of a server you choose: you see through its
 camera, hear through its microphone, speak through its speaker, read every sensor and
 move it, from a browser. The robot can switch between servers and apps: the full
-dashboard (`stackchan-server`), a pet for kids (`stackchan-pet`), or a cockpit that also
-drives a small car (`sbot`).
+dashboard ([stackchan-server](https://github.com/mj41/stackchan-server)), a pet for kids
+([stackchan-pet](https://github.com/mj41/stackchan-pet)), or a cockpit that also drives a small car
+([sbot](https://github.com/mj41/sbot)). All of them are part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first,
+privacy first platform for a home.
 
 ## What you need
 
@@ -37,7 +39,7 @@ go run ./cmd/stackchan-server
 - It prints its address, e.g. `http://192.168.1.10:8765`. The robot and your phone must
   reach it: allow TCP port 8765 in the firewall if needed.
 - More options (HTTPS for the browser's microphone, state file, offering other servers):
-  the server's readme, "Run".
+  the server's readme, [Run](https://github.com/mj41/stackchan-server#run).
 
 ## 3. Configure the firmware
 
@@ -138,17 +140,17 @@ Apps that run as servers the robot can switch to:
 
 | App | What | Repo |
 |---|---|---|
-| Dashboard | everything the robot has: camera, mic, speaker, every sensor, IR, NFC, files | `stackchan-server` |
-| Pet | a Tamagotchi for kids, fed with NFC cards, with games and routines | `stackchan-pet` |
-| Cockpit | the robot's camera with a joystick for a TPBot car, head pad and lights, a safety stop | `sbot` |
+| Dashboard | everything the robot has: camera, mic, speaker, every sensor, IR, NFC, files | [stackchan-server](https://github.com/mj41/stackchan-server) |
+| Pet | a Tamagotchi for kids, fed with NFC cards, with games and routines | [stackchan-pet](https://github.com/mj41/stackchan-pet) |
+| Cockpit | the robot's camera with a joystick for a TPBot car, head pad and lights, a safety stop | [sbot](https://github.com/mj41/sbot) |
 
 ## 8. Optional: drive a TPBot car
 
-The robot can drive an ELECFREAKS TPBot car whose micro:bit runs `tpbot-ble`, over
+The robot can drive an ELECFREAKS TPBot car whose micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble), over
 Bluetooth. Most people do not have one: the firmware keeps Bluetooth off until you
 enable the car.
 
-1. **Flash the micro:bit** with `tpbot-ble` (needs TinyGo 0.41 or newer): see its readme.
+1. **Flash the micro:bit** with [tpbot-ble](https://github.com/mj41/tpbot-ble) (needs TinyGo 0.41 or newer): see its readme.
    Put the robot's Bluetooth address in `~/.config/tpbot-ble/allow` first, so only your
    robot may drive the car. The robot's Bluetooth address is its Wi-Fi MAC plus 2 in the
    last byte (the robot id `stackchan-0a1b2c3d4e50` gives `0A:1B:2C:3D:4E:52`), or flash
@@ -156,7 +158,7 @@ enable the car.
 2. **Switch the TPBot on with one press** of its power button (its LEDs breathe green).
    A second press starts its own line-following mode (rainbow LEDs), which drives by
    itself.
-3. **Run `sbot`** and switch the robot to it (step 7). In sbot's page, open **More** and
+3. **Run [sbot](https://github.com/mj41/sbot#run)** and switch the robot to it (step 7). In sbot's page, open **More** and
    turn the car on. The robot registers again with the car commands and connects to the
    car within seconds.
 4. Drive with the joystick or WASD while watching through the robot's camera. The car
@@ -179,7 +181,7 @@ enable the car.
 
 - **One shared token** per server, compiled into the firmware. Anyone who reads the
   robot's flash gets it. Per-robot keys and owner-signed permissions are designed (the
-  trust design in `stackchan-mj`, `docs/design.md`) but not built yet.
+  trust design, [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj) but not built yet.
 - **Use your own server on your own network** for anything private. Camera and
   microphone stream only while a paired browser watches or listens, and the robot shows
   it.

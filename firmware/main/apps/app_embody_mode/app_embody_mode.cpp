@@ -2689,7 +2689,8 @@ void AppEmbodyMode::flush_speaker()
 
 /* ------------------------------- TPBot car -------------------------------- */
 
-// Optional: a TPBot car whose micro:bit runs ../tpbot-ble firmware, over BLE.
+// Optional: a TPBot car whose micro:bit runs the tpbot-ble firmware
+// (https://github.com/mj41/tpbot-ble), over BLE.
 // Off until car_enable {"on": true}; the setting stays in NVS. The car_* names are
 // the same as tpbot-bridge's (sbot readme, "Car capability"), so a server cannot
 // tell whether the car hangs off this robot or off the bridge.
