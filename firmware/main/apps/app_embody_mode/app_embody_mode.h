@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "embody_client.h"
+#include "e2e.h"
 #include "asset_store.h"
 #include "sprite_layer.h"
 #include "sample_ring.h"
@@ -144,6 +145,14 @@ private:
     // Commands arrive during _client->update(), outside the LVGL lock, and run
     // afterwards under it.
     std::vector<std::pair<std::string, std::string>> _pending_commands;
+
+    // End-to-end encryption (e2e.h), per server: on for the URLs in _e2e_urls (NVS).
+    embody::E2E _e2e;
+    bool _e2e_ok = false;
+    std::vector<std::string> _e2e_urls;
+    void load_e2e_urls();
+    bool is_e2e(const std::string& url) const;
+    void e2e_command(const std::string& command, const std::string& args, bool sealed);
 
     // Robot events come from HAL tasks (IMU, head touch), the NFC task and LVGL callbacks (taps).
     struct PendingEvent {

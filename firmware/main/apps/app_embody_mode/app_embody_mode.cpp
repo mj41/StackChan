@@ -190,7 +190,7 @@ void AppEmbodyMode::onOpen()
     commands.push_back("asset_delete");
     commands.push_back("servo_power");
     commands.push_back("rotate");
-    for (const char* c : {"server_add", "server_remove", "server_default", "server_switch"}) {
+    for (const char* c : {"server_add", "server_remove", "server_default", "server_switch", "server_e2e", "e2e_forget"}) {
         commands.push_back(c);
     }
     if (hal_bridge::board_get_camera()) {
@@ -208,6 +208,9 @@ void AppEmbodyMode::onOpen()
     _robot_id = robot_id;
     _commands = commands;
     _assets.mount();
+    embody::E2E::selfTest();  // the reference vectors, logged
+    _e2e_ok = _e2e.begin(_robot_id);
+    load_e2e_urls();
     load_servers();
     if (!_default_url.empty()) {
         connect_server(_server_index);
@@ -2179,10 +2182,15 @@ void AppEmbodyMode::connect_server(size_t index)
         .firmware  = esp_app_get_description()->version,
         .commands  = _commands,
         .measurements = measurements,
+        .e2e          = _e2e_ok && is_e2e(_servers[index].url) ? &_e2e : nullptr,
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
             flush_speaker();
+            return;
+        }
+        if (command == "server_e2e" || command == "e2e_forget") {  // needs to know who sent it
+            e2e_command(command, args, _client->lastCommandSealed());
             return;
         }
         _pending_commands.emplace_back(command, args);
@@ -2897,4 +2905,81 @@ bool AppEmbodyMode::automation_command(const std::string& command, const Arduino
     (void)args;
 #endif
     return false;
+}
+
+/* ----------------------- End-to-end encryption ---------------------------- */
+
+// Which servers get only ciphertext (home-w42-eu docs/e2ee.md): a list of URLs in NVS.
+void AppEmbodyMode::load_e2e_urls()
+{
+    _e2e_urls.clear();
+    Settings settings("embody", false);
+    ArduinoJson::JsonDocument doc;
+    if (!ArduinoJson::deserializeJson(doc, settings.GetString("e2e_urls", "[]"))) {
+        for (const char* u : doc.as<ArduinoJson::JsonArray>()) {
+            if (u) {
+                _e2e_urls.emplace_back(u);
+            }
+        }
+    }
+}
+
+bool AppEmbodyMode::is_e2e(const std::string& url) const
+{
+    return std::find(_e2e_urls.begin(), _e2e_urls.end(), url) != _e2e_urls.end();
+}
+
+// server_e2e {server?, on}: anyone may turn encryption on (it only protects more); only an
+// enrolled browser (a sealed command) may turn it off, so a relay cannot downgrade it.
+// e2e_forget: an enrolled browser forgets every enrolled browser (a new epoch).
+void AppEmbodyMode::e2e_command(const std::string& command, const std::string& args_json, bool sealed)
+{
+    ArduinoJson::JsonDocument args;
+    ArduinoJson::deserializeJson(args, args_json);
+    auto refuse = [&](const char* reason) {
+        mclog::tagWarn(_tag, "{} refused: {}", command, reason);
+        queue_event("e2e_refused", {}, {{"command", command}, {"reason", reason}});
+    };
+    if (command == "e2e_forget") {
+        if (!sealed) {
+            return refuse("only from an enrolled browser");
+        }
+        _e2e.forgetAll();
+        queue_event("e2e_forgotten");
+        return;
+    }
+    const std::string key = args["server"] | "";
+    const int i           = key.empty() ? (int)_server_index : find_server(key);
+    const bool on         = args["on"] | false;
+    if (i < 0) {
+        return refuse("no such server");
+    }
+    if (on && !_e2e_ok) {
+        return refuse("encryption is not available");
+    }
+    if (!on && !sealed) {
+        return refuse("only an enrolled browser may turn encryption off");
+    }
+    const std::string url = _servers[i].url;
+    if (on == is_e2e(url)) {
+        return;
+    }
+    if (on) {
+        _e2e_urls.push_back(url);
+    } else {
+        _e2e_urls.erase(std::remove(_e2e_urls.begin(), _e2e_urls.end(), url), _e2e_urls.end());
+    }
+    ArduinoJson::JsonDocument doc;
+    auto arr = doc.to<ArduinoJson::JsonArray>();
+    for (const auto& u : _e2e_urls) {
+        arr.add(u);
+    }
+    std::string json;
+    ArduinoJson::serializeJson(doc, json);
+    Settings settings("embody", true);
+    settings.SetString("e2e_urls", json);
+    mclog::tagInfo(_tag, "e2e {} for {}", on ? "on" : "off", url);
+    if ((size_t)i == _server_index) {
+        _pending_switch = i;  // reconnect: Register says e2e, the QR code gets its fragment
+    }
 }

@@ -13,10 +13,13 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <ArduinoJson.hpp>
 
 class WebSocket;
 
 namespace embody {
+
+class E2E;
 
 /**
  * @brief WebSocket client for an Embody Mode server, e.g. stackchan-server
@@ -37,6 +40,8 @@ public:
         std::string firmware;
         std::vector<std::string> commands;
         std::vector<std::string> measurements;
+        // End-to-end encryption for this server (e2e.h; nullptr: plaintext). Owned by the app.
+        E2E* e2e = nullptr;
     };
 
     using Telemetry = std::vector<std::pair<std::string, double>>;  // double: Unix times need it
@@ -110,6 +115,15 @@ public:
     {
         return _state == State::Registered;
     }
+    // The command now in onCommand came sealed by an enrolled browser (not from the relay).
+    bool lastCommandSealed() const
+    {
+        return _last_sealed;
+    }
+    bool encrypted() const
+    {
+        return _config.e2e != nullptr;
+    }
 
     // Standby: disconnect now and stay offline for delayMs (then reconnect as usual).
     void standby(uint32_t delayMs);
@@ -131,6 +145,9 @@ private:
     State _state = State::Connecting;
     std::string _status_text;
     std::string _pair_url;
+    std::string _pair_base;  // the server's pairing URL, before the robot adds the e2e fragment
+    bool _last_sealed = false;
+    bool _plain_binary_logged = false;
     std::string _pair_code;
     int _viewers        = 0;
     bool _paired_on_reconnect = false;
@@ -148,6 +165,9 @@ private:
     bool fast_command(const char* data, size_t len);
     void handle_frame(const Inbound& in);
     bool send(const std::string& frame);
+    // Telemetry, events and pongs: sealed as E2EData when encrypted.
+    bool send_report(ArduinoJson::JsonDocument& doc);
+    void handle_command(const std::string& command, ArduinoJson::JsonVariantConst args, int64_t rxUs);
     void send_telemetry();
 };
 

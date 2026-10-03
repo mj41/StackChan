@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "embody_client.h"
+#include "e2e.h"
 #include <cstring>
 #include <hal/hal.h>
 #include <board.h>
@@ -83,7 +84,19 @@ void Client::update()
     }
     while (!inbox.empty()) {
         const auto& in = inbox.front();
-        if (in.binary) {
+        if (in.binary && _config.e2e) {
+            // Encrypted: only sealed messages from an enrolled browser (0x31); the relay could
+            // inject plaintext pictures, files or audio.
+            std::string plain;
+            if ((uint8_t)in.text[0] == 0x31 && _config.e2e->openBrowserBinary(in.text, plain) && !plain.empty()) {
+                if (onBinary) {
+                    onBinary((uint8_t)plain[0], plain.substr(1));
+                }
+            } else if (!_plain_binary_logged) {
+                _plain_binary_logged = true;
+                mclog::tagWarn(_tag, "e2e: plaintext binary from the relay refused (type 0x{:02x})", (uint8_t)in.text[0]);
+            }
+        } else if (in.binary) {
             if (onBinary) {
                 onBinary((uint8_t)in.text[0], in.text.substr(1));
             }
@@ -166,6 +179,9 @@ void Client::connect()
     for (const auto& m : _config.measurements) {
         measurements.add(m);
     }
+    if (_config.e2e) {
+        body["labels"]["e2e"] = "1";
+    }
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
     send(frame);
@@ -175,6 +191,9 @@ void Client::connect()
 // hundreds of ms with camera frames and drawing). Other frames return false.
 bool Client::fast_command(const char* data, size_t len)
 {
+    if (_config.e2e) {
+        return false;  // encrypted: car commands come sealed, through the app loop
+    }
     static constexpr char key[] = "\"car_";
     if (!memmem(data, len, key, sizeof key - 1)) {
         return false;
@@ -221,9 +240,10 @@ void Client::handle_frame(const Inbound& in)
         _ws.reset();
         schedule_retry(State::Rejected, "Server rejected: " + reason, _max_backoff);
     } else if (kind == "PairCode") {
-        _pair_url  = body["url"] | "";
+        _pair_base = body["url"] | "";
+        _pair_url  = _config.e2e ? _pair_base + "#" + _config.e2e->fragment() : _pair_base;
         _pair_code = body["code"] | "";
-        mclog::tagInfo(_tag, "pair code {} -> {}", _pair_code, _pair_url);
+        mclog::tagInfo(_tag, "pair code {} -> {}", _pair_code, _pair_base);  // never the e2e fragment: it holds the pairing secret
         _revision++;
     } else if (kind == "Paired") {
         _viewers             = body["viewers"] | 0;
@@ -237,30 +257,83 @@ void Client::handle_frame(const Inbound& in)
             onServerOffer(servers);
         }
     } else if (kind == "RobotCommand") {
-        _command_count++;
         std::string command = body["command"] | "";
-        if (command == "ping") {
-            // Answer right here: queue_ms is how long the ping waited for the app loop.
-            ArduinoJson::JsonDocument pong;
-            pong["kind"] = "RobotPong";
-            pong["meta"].to<ArduinoJson::JsonObject>();
-            pong["body"]["id"]       = body["args"]["id"] | "";
-            pong["body"]["queue_ms"] = (esp_timer_get_time() - in.rxUs) / 1000.0;
-            std::string frame;
-            ArduinoJson::serializeJson(pong, frame);
-            send(frame);
+        // Encrypted: the relay may only switch streams; what streams stays sealed.
+        static const char* switches[] = {"camera", "mic", "imu_stream", "touch_stream", "light_stream"};
+        if (_config.e2e && std::none_of(std::begin(switches), std::end(switches), [&](const char* s) { return command == s; })) {
+            mclog::tagWarn(_tag, "e2e: plaintext command refused: {}", command);
             return;
         }
-        mclog::tagInfo(_tag, "command: {}", command);
-        if (onCommand && !command.empty()) {
-            std::string args = "{}";
-            if (body["args"].is<ArduinoJson::JsonObject>()) {
-                args.clear();
-                ArduinoJson::serializeJson(body["args"], args);
-            }
-            onCommand(command, args);
+        _last_sealed = false;
+        handle_command(command, body["args"], in.rxUs);
+    } else if (_config.e2e && (kind == "E2EEnroll" || kind == "E2EHello")) {
+        std::string gk;
+        bool ok = kind == "E2EEnroll" ? _config.e2e->enroll(body["b"] | "", body["mac"] | "", gk)
+                                      : _config.e2e->hello(body["b"] | "", gk);
+        if (!ok) {
+            return;
         }
+        send("{\"kind\":\"E2EGroupKey\",\"meta\":{},\"body\":" + gk + "}");
+        if (kind == "E2EEnroll" && !_pair_base.empty()) {  // a fresh secret in the QR code
+            _pair_url = _pair_base + "#" + _config.e2e->fragment();
+            _revision++;
+        }
+    } else if (_config.e2e && kind == "E2ECommand") {
+        std::string plain;
+        if (!_config.e2e->openCommand(body["b"] | "", body["n"] | "", body["c"] | "", plain)) {
+            mclog::tagWarn(_tag, "e2e: sealed command refused");
+            return;
+        }
+        ArduinoJson::JsonDocument cmd;
+        if (ArduinoJson::deserializeJson(cmd, plain)) {
+            return;
+        }
+        _last_sealed = true;
+        handle_command(cmd["command"] | "", cmd["args"], in.rxUs);
+        _last_sealed = false;
     }
+}
+
+void Client::handle_command(const std::string& command, ArduinoJson::JsonVariantConst args, int64_t rxUs)
+{
+    _command_count++;
+    if (command == "ping") {
+        // Answer right here: queue_ms is how long the ping waited for the app loop.
+        ArduinoJson::JsonDocument pong;
+        pong["kind"] = "RobotPong";
+        pong["meta"].to<ArduinoJson::JsonObject>();
+        pong["body"]["id"]       = args["id"] | "";
+        pong["body"]["queue_ms"] = (esp_timer_get_time() - rxUs) / 1000.0;
+        send_report(pong);
+        return;
+    }
+    mclog::tagInfo(_tag, "command: {}{}", command, _last_sealed ? " (sealed)" : "");
+    if (onCommand && !command.empty()) {
+        std::string a = "{}";
+        if (args.is<ArduinoJson::JsonObjectConst>()) {
+            a.clear();
+            ArduinoJson::serializeJson(args, a);
+        }
+        onCommand(command, a);
+    }
+}
+
+bool Client::send_report(ArduinoJson::JsonDocument& doc)
+{
+    if (!_config.e2e) {
+        std::string frame;
+        ArduinoJson::serializeJson(doc, frame);
+        return send(frame);
+    }
+    ArduinoJson::JsonDocument plain;
+    plain["kind"] = doc["kind"];
+    plain["body"] = doc["body"];
+    std::string p, sealed;
+    ArduinoJson::serializeJson(plain, p);
+    if (!_config.e2e->sealData(p, sealed)) {
+        return false;
+    }
+    return send("{\"kind\":\"E2EData\",\"meta\":{},\"body\":" + sealed + "}");
 }
 
 bool Client::send(const std::string& frame)
@@ -290,9 +363,7 @@ void Client::sendTelemetry(const Telemetry& t)
     for (const auto& [key, value] : t) {
         measurements[key] = value;
     }
-    std::string frame;
-    ArduinoJson::serializeJson(doc, frame);
-    send(frame);
+    send_report(doc);
 }
 
 void Client::sendEvent(const std::string& name, const Telemetry& data, const Texts& text)
@@ -313,15 +384,24 @@ void Client::sendEvent(const std::string& name, const Telemetry& data, const Tex
             obj[key] = value;
         }
     }
-    std::string frame;
-    ArduinoJson::serializeJson(doc, frame);
-    send(frame);
+    send_report(doc);
 }
 
 bool Client::sendBinary(uint8_t type, const uint8_t* data, size_t len)
 {
     if (_state != State::Registered || !_ws || !_ws->IsConnected()) {
         return false;
+    }
+    if (_config.e2e) {
+        std::string sealed;
+        if (!_config.e2e->sealBinary(type, data, len, sealed)) {
+            return false;
+        }
+        if (sealed.size() > 65535) {  // xiaozhi WebSocket::Send limit
+            mclog::tagWarn(_tag, "binary message too large: {} bytes", sealed.size());
+            return false;
+        }
+        return _ws->Send(sealed.data(), sealed.size(), true);
     }
     if (len + 1 > 65535) {  // xiaozhi WebSocket::Send limit
         mclog::tagWarn(_tag, "binary message too large: {} bytes", len + 1);
