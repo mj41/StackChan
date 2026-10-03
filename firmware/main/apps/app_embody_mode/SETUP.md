@@ -34,9 +34,11 @@ cable** (some cables only charge). Optional, for the car: a **micro:bit V2** and
    over the cable, never to the server.
 4. Press **Set up my robot** and pick the **USB JTAG/serial debug unit**.
 
-The first time, the page saves a **backup of the robot's current firmware** to your computer
-(about a minute; keep the file private, it holds the robot's old settings too). With it, Options →
-Firmware → **Restore the original firmware** puts the robot back as it was. Then it installs the
+With **Back up the current firmware first** (on by default), the page first saves the robot's
+current firmware to your computer, where the browser keeps downloads (e.g. `~/Downloads`; about
+two minutes; keep the file private, it holds the robot's old settings too). The first backup is
+the robot's original: Options → Firmware → **Restore the original firmware** puts the robot back
+as it was. Later backups can be put back from a terminal (`esptool.py write_flash 0x0 <file>`). Then it installs the
 latest Embody Mode firmware, adds the robot to your account with its own token, writes the server, the token and the Wi-Fi into the robot, and restarts it into
 Embody Mode. It takes about two minutes. Then:
 
