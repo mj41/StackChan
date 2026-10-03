@@ -1,0 +1,6 @@
+# The published Embody Mode firmware (CI and ./container.sh release): no server and no token
+# built in. A robot is set up over USB (chan.w42.eu/setup, stackchan-usb): the server, its
+# own token and Wi-Fi go into its settings; automation lets it start Embody Mode by itself.
+CONFIG_STACKCHAN_EMBODY_SERVER_URL=""
+CONFIG_STACKCHAN_EMBODY_TOKEN=""
+CONFIG_STACKCHAN_EMBODY_AUTOMATION=y

@@ -2012,7 +2012,10 @@ void AppEmbodyMode::update_power_events()
 void AppEmbodyMode::load_servers()
 {
     _servers.clear();
-    _servers.push_back({host_of(CONFIG_STACKCHAN_EMBODY_SERVER_URL), CONFIG_STACKCHAN_EMBODY_SERVER_URL,
+    // A release build has no built-in server: it is set up over USB (usb_setup.h), which
+    // adds the server and makes it the default.
+    const std::string builtin = CONFIG_STACKCHAN_EMBODY_SERVER_URL;
+    _servers.push_back({builtin.empty() ? "Set up: chan.w42.eu/setup" : host_of(builtin), builtin,
                         CONFIG_STACKCHAN_EMBODY_TOKEN, "built-in"});
     Settings settings("embody", false);
     ArduinoJson::JsonDocument doc;
@@ -2025,6 +2028,9 @@ void AppEmbodyMode::load_servers()
         }
     }
     _default_url      = settings.GetString("default", _servers[0].url);  // "" = none: choose at start
+    if (_default_url.empty() && _servers.size() > 1 && builtin.empty()) {
+        _default_url = _servers[1].url;  // set up over USB without "default": the one server there is
+    }
     const int def     = find_server(_default_url);
     _server_index     = def < 0 ? 0 : def;
     _shown_index      = _server_index;
@@ -2138,7 +2144,11 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
 // (Re)connects to _servers[index]: a fresh client with that URL and token.
 void AppEmbodyMode::connect_server(size_t index)
 {
-    index         = std::min(index, _servers.size() - 1);
+    index = std::min(index, _servers.size() - 1);
+    if (_servers[index].url.empty()) {  // the release build's empty built-in entry: nothing to contact
+        mclog::tagInfo(_tag, "not set up: connect over USB at chan.w42.eu/setup");
+        return;
+    }
     _server_index = index;
     _shown_index  = index;
     if (_client) {

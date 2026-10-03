@@ -12,7 +12,9 @@ add_compile_options(-Wno-missing-field-initializers)
 # self-hosted / custom deployments pin CONFIG_STACKCHAN_SERVER_URL,
 # CONFIG_OTA_URL, etc. without touching committed defaults.
 # Manual equivalent: SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.local" idf.py build
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.local")
+# Never for a release build (-D STACKCHAN_RELEASE=1, ./container.sh release): the local overlay
+# holds a token, and a release image is published.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.local" AND NOT STACKCHAN_RELEASE)
     set(SDKCONFIG_DEFAULTS
         "${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults;${CMAKE_CURRENT_SOURCE_DIR}/sdkconfig.defaults.local"
         CACHE STRING "ESP-IDF sdkconfig default files (auto-extended with local overlay)" FORCE)
