@@ -1,6 +1,6 @@
-# Setting up a Stack-chan with Embody Mode
+# Setting up a Stackchan with Embody Mode
 
-**Status:** 2026-10-02. Written while doing it on one M5Stack Stack-chan (CoreS3), from a
+**Status:** 2026-10-02. Written while doing it on one M5Stack Stackchan robot (CoreS3), from a
 Fedora laptop with podman; the container build (step 4) and flashing from the container
 (step 5) were tested there.
 
@@ -14,7 +14,7 @@ privacy first platform for a home.
 
 ## What you need
 
-- An **M5Stack Stack-chan** with its CoreS3 (ESP32-S3), and a **USB-C data cable** (some
+- An **M5Stack Stackchan** robot with its CoreS3 (ESP32-S3), and a **USB-C data cable** (some
   cables only charge).
 - A computer with **podman** or **docker** (or a local ESP-IDF 5.5.4, see step 4).
 - **Go 1.25 or newer** for the server, on a machine in the same network as the robot.

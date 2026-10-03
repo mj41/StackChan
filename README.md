@@ -11,6 +11,11 @@
 > are in [stackchan-mj](https://github.com/mj41/stackchan-mj). All of them are part of
 > [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home.
 >
+> **A proof of concept, vibe coded:** written with AI agents and tested on a real robot at home,
+> but neither the code nor its security has been reviewed by humans. Use it on your own network.
+> **Want more?** Ask in [home-w42-eu's issues](https://github.com/mj41/home-w42-eu/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
+> mj41 codes for attention food.
+>
 > <img src="firmware/main/apps/app_embody_mode/screenshots/face.jpg" width="320" alt="Embody Mode: the robot's face with a speech bubble"> <img src="firmware/main/apps/app_embody_mode/screenshots/qr-screen.jpg" width="320" alt="Embody Mode: the QR screen with the pairing code">
 >
 > The rest of this page is upstream's.

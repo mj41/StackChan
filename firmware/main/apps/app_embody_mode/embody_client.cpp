@@ -120,7 +120,7 @@ void Client::connect()
         _inbox = {};
     }
 
-    auto url = _config.serverUrl + "/api/devices/connect";  // servers before 2026-10-02 know only /api/workers/connect
+    auto url = _config.serverUrl + "/api/devices/connect";
     mclog::tagInfo(_tag, "connecting to {} as {}", url, _config.robotId);
 
     auto network = Board::GetInstance().GetNetwork();
@@ -130,7 +130,7 @@ void Client::connect()
         return;
     }
     _ws->SetHeader("Authorization", ("Bearer " + _config.token).c_str());
-    _ws->SetHeader("X-Device-Id", _config.robotId.c_str());  // servers before 2026-10-02 know only X-Yolovm-Worker-Id
+    _ws->SetHeader("X-Device-Id", _config.robotId.c_str());
     _ws->OnData([this](const char* data, size_t len, bool binary) {
         if (len == 0 || len > 256 * 1024) {
             return;

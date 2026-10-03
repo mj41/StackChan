@@ -2,7 +2,14 @@
 
 To set up a robot, see [SETUP.md](SETUP.md).
 
-Launcher app (first icon) that lets you control this Stack-chan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj. Setting up a robot: [SETUP.md](SETUP.md).
+Launcher app (first icon) that lets you control this Stackchan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj. Setting up a robot: [SETUP.md](SETUP.md).
+
+> **A proof of concept, vibe coded.** Written with AI agents and tested on real hardware at
+> home, but neither the code nor its security has been reviewed by humans. Use it on your
+> own network, and don't trust it with anything private yet.
+>
+> **Want more?** Ask in the [issues](https://github.com/mj41/home-w42-eu/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
+> mj41 codes for attention food.
 
 | The face, while a browser drives it | The QR screen: scan to pair, or type the code |
 |---|---|
