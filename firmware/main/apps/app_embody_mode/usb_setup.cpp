@@ -127,6 +127,22 @@ static void handle(const std::string& json)
             mclog::tagInfo(_tag, "server {} saved{}", std::string(req["server"]["url"] | ""),
                            (req["default"] | false) ? " as the default" : "");
         }
+        // More servers (apps) at once; "pin" makes one of them the default at start.
+        if (req["servers"].is<ArduinoJson::JsonArray>()) {
+            for (ArduinoJson::JsonObject o : req["servers"].as<ArduinoJson::JsonArray>()) {
+                if (!save_server(o["name"] | "", o["url"] | "", o["token"] | "", false)) {
+                    return reply_error("server url must start with ws:// or wss://");
+                }
+                mclog::tagInfo(_tag, "server {} saved", std::string(o["url"] | ""));
+            }
+            applied.add("servers");
+        }
+        if (const std::string pin = req["pin"] | ""; !pin.empty()) {
+            Settings settings("embody", true);
+            settings.SetString("default", pin);
+            applied.add("pin");
+            mclog::tagInfo(_tag, "pinned {}", pin);
+        }
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
         if (req["autostart"].is<bool>()) {
             embody::set_autostart(req["autostart"].as<bool>());
@@ -167,7 +183,7 @@ static void setup_task(void*)
                     handle(line.substr(strlen(_prefix)));
                 }
                 line.clear();
-            } else if (line.size() < 2048) {
+            } else if (line.size() < 4096) {
                 line.push_back(c);
             }
         }

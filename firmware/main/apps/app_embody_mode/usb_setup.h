@@ -18,6 +18,7 @@ namespace embody {
  *                                            "original"?}
  *   {"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,
  *    "wifi":{"ssid","password"},"original":{...}}  -> {"ok":true,"applied":[...]}
+ *   "servers":[{"name","url","token"},...] adds more at once; "pin":"<url>" makes it the default
  *   {"op":"restart"}                     -> {"ok":true}, then a restart into Embody Mode
  * "original": the firmware the robot had before its first setup (the setup page reads its
  *   identity and saves a backup); stored once (NVS embody/orig_fw), never replaced.
