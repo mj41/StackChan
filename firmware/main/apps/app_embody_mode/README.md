@@ -55,7 +55,7 @@ A computer writes a server, its token, autostart and Wi-Fi into the robot's sett
 - `{"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,"wifi":{"ssid","password"}}` → the server is added to the list (origin "added") and made the default; every part is optional.
 - `{"op":"restart"}` → a restart into Embody Mode.
 
-So nobody needs to build firmware for a token: the **release build** (`./container.sh release`, or an `embody-v*` release built by CI) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
+So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
 
 ## Configuration
 

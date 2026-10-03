@@ -26,41 +26,23 @@ jobs:
       - name: Dependencies
         run: python3 fetch_repos.py
 
-      - name: Build the release image
+      - name: Build (release.sh, the same as ./container.sh release)
         run: |
           . "$IDF_PATH/export.sh"
-          idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
-            -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build
-          cd build-release
-          python -m esptool --chip esp32s3 merge_bin -o stackchan-embody.bin @flash_args
-
-      - name: Parts and manifest
-        run: |
-          version="${GITHUB_REF_NAME#embody-}"
+          version="$GITHUB_REF_NAME"
           [ "$GITHUB_REF_TYPE" = tag ] || version="dev-${GITHUB_SHA::8}"
-          mkdir -p dist
-          cd build-release
-          parts=""
-          while read -r offset file; do
-            name="$(basename "$file")"
-            cp "$file" "../dist/$name"
-            parts="$parts{\"path\":\"$name\",\"offset\":$((offset)),\"sha256\":\"$(sha256sum "$file" | cut -d' ' -f1)\"},"
-          done < <(tail -n +2 flash_args)
-          cp stackchan-embody.bin ../dist/
-          printf '{"name":"Stackchan Embody Mode","version":"%s","chipFamily":"ESP32-S3","parts":[%s]}\n' \
-            "$version" "${parts%,}" > ../dist/manifest.json
-          cd ../dist && sha256sum * > SHA256SUMS && cat manifest.json
+          ./release.sh "$version"
 
       - uses: actions/upload-artifact@v4
         with:
           name: embody-firmware
-          path: firmware/dist/
+          path: firmware/build-release/dist/
 
       - name: Release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
-          files: firmware/dist/*
+          files: firmware/build-release/dist/*
           body: |
             Embody Mode firmware for M5Stack Stackchan (CoreS3), with no server or token inside.
             Set a robot up in Chrome at https://chan.w42.eu/setup (USB), or flash

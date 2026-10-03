@@ -68,9 +68,8 @@ things on your own server (B).
    then; the URL and the token go only to the robot, over the cable.
 
    - To keep everything at home, serve the page yourself: start the server with
-     `-firmware-dir <dir>` holding the release files (an `embody-v*` release of
-     [mj41/StackChan](https://github.com/mj41/StackChan/releases), or `./container.sh release`
-     from C) and open `http://localhost:8765/setup` on that computer (Web Serial needs
+     `-firmware-dir <dir>` holding the files of an official `embody-v*` release of
+     [mj41/StackChan](https://github.com/mj41/StackChan/releases) and open `http://localhost:8765/setup` on that computer (Web Serial needs
      `localhost` or HTTPS).
    - Or, on a robot that already has Embody Mode, from a terminal:
      `go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
@@ -81,7 +80,11 @@ things on your own server (B).
 
 ## C. Build the firmware yourself
 
-For changes to the firmware, or to build what the release has.
+For changes to the firmware. There is one firmware source; the official release is that
+source built with its release configuration, and everything else a robot needs (server,
+token, Wi-Fi, autostart) is its settings, written over USB. Your own builds are for your own
+robots: flash them from a terminal, as below. The setup page installs only the official
+release.
 
 ### 1. Get the code
 
@@ -159,17 +162,19 @@ Plug the cable into the USB-C port **on the robot's head** (the CoreS3), then:
   CoreS3: hold its reset button until the green LED lights up) and flash again.
 - **Opening the serial port restarts the robot.** That is normal for the CoreS3.
 
-### 5. A release image of your changes
+### 5. Set it up over USB
 
-```bash
-./container.sh release
-```
+Without a built-in server (step 2), set the robot up as in B, step 2: the setup page with
+**Keep the robot's firmware**, or `stackchan-usb`.
 
-builds without `sdkconfig.defaults.local` (no server, no token inside; automation on) into
-`firmware/build-release/dist`: the parts, `manifest.json` with their SHA-256, and one merged
-image `stackchan-embody.bin` for address 0x0. Give the merged image to the setup page (Options:
-"My own firmware file"), or serve `dist` with `stackchan-server -firmware-dir` so `/setup`
-installs it. Pushing an `embody-v*` tag builds the same on GitHub and attaches it to a release.
+### The official release
+
+Pushing an `embody-v*` tag makes GitHub build the release: `sdkconfig.defaults` plus
+`sdkconfig.defaults.release` (no server, no token, automation on), never
+`sdkconfig.defaults.local`. It attaches the parts, `manifest.json` with their SHA-256 and one
+merged image to the release; servers give those to `/setup` with `-firmware-dir`.
+`./container.sh release` runs the same script, `firmware/release.sh`, locally (into `firmware/build-release/dist`), to
+check it before tagging.
 
 ## First start
 

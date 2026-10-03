@@ -3,7 +3,7 @@
 # install, and the same toolchain for everyone (pinned by digest).
 #
 #   ./container.sh build              fetch the dependencies if missing, then build
-#   ./container.sh release            the published image (no server or token): build-release/stackchan-embody.bin
+#   ./container.sh release            the official image (release.sh; no server or token): build-release/dist
 #   ./container.sh flash [PORT]       flash (the CoreS3's USB serial port is found by itself)
 #   ./container.sh menuconfig         the ESP-IDF configuration menu
 #   ./container.sh shell              a shell in the container, in this directory
@@ -66,24 +66,9 @@ case ${1:-build} in
         run idf.py -B "$BUILD_DIR" -p "$dev" flash
         ;;
     release)
-        # The published image: sdkconfig.defaults + sdkconfig.defaults.release, never the
-        # local overlay (it holds your token). One merged file for flashing at 0x0.
+        # The official image, as the release workflow builds it (release.sh).
         need_deps
-        run bash -c 'idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
-            -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build &&
-            cd build-release && python -m esptool --chip esp32s3 merge_bin -o stackchan-embody.bin @flash_args'
-        # The parts and a manifest, as the release workflow publishes them (for /setup).
-        version=$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)
-        rm -rf build-release/dist && mkdir -p build-release/dist
-        parts=""
-        while read -r offset file; do
-            cp "build-release/$file" build-release/dist/
-            parts="$parts{\"path\":\"$(basename "$file")\",\"offset\":$((offset)),\"sha256\":\"$(sha256sum "build-release/$file" | cut -d' ' -f1)\"},"
-        done < <(tail -n +2 build-release/flash_args)
-        cp build-release/stackchan-embody.bin build-release/dist/
-        printf '{"name":"Stackchan Embody Mode","version":"%s","chipFamily":"ESP32-S3","parts":[%s]}\n' \
-            "${version#embody-}" "${parts%,}" > build-release/dist/manifest.json
-        echo "build-release/dist: $(ls build-release/dist | tr '\n' ' ')"
+        run ./release.sh "$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)"  # git sees the repo only here
         ;;
     menuconfig)
         run idf.py -B "$BUILD_DIR" menuconfig

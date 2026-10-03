@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# The official Embody Mode firmware: this source built with sdkconfig.defaults +
+# sdkconfig.defaults.release (no server or token inside: a robot gets those as settings over
+# USB), never the local overlay. Run inside ESP-IDF (the release workflow, or
+# ./container.sh release). Writes build-release/dist: the parts, manifest.json with their
+# SHA-256 (for chan.w42.eu/setup), one merged image for 0x0, SHA256SUMS.
+#
+#   ./release.sh [VERSION]      default: git describe of the last embody-v* tag
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")"
+
+version=${1:-$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)}
+version=${version#embody-}
+
+idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
+    -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build
+
+dist=build-release/dist
+rm -rf "$dist" && mkdir -p "$dist"
+(cd build-release && python -m esptool --chip esp32s3 merge_bin -o ../$dist/stackchan-embody.bin @flash_args)
+parts=""
+while read -r offset file; do
+    cp "build-release/$file" "$dist/"
+    parts="$parts{\"path\":\"$(basename "$file")\",\"offset\":$((offset)),\"sha256\":\"$(sha256sum "build-release/$file" | cut -d' ' -f1)\"},"
+done < <(tail -n +2 build-release/flash_args)
+printf '{"name":"Stackchan Embody Mode","version":"%s","chipFamily":"ESP32-S3","parts":[%s]}\n' \
+    "$version" "${parts%,}" > "$dist/manifest.json"
+(cd "$dist" && sha256sum -- * > SHA256SUMS)
+echo "$dist: $(ls "$dist" | tr '\n' ' ')"
+cat "$dist/manifest.json"
