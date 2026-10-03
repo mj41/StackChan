@@ -9,11 +9,17 @@
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
-version=${1:-$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)}
+version=${1:-$(git -c safe.directory='*' describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)}
 version=${version#embody-}
 # __DATE__ and __TIME__ (e.g. mooncake's banner) from the commit, not the clock: the same
 # source gives the same bytes. ./container.sh passes it in (git sees the repo only outside).
-export SOURCE_DATE_EPOCH=${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct 2>/dev/null || echo 0)}
+# safe.directory: in a CI container the checkout belongs to another user. No fallback: a wrong
+# time would give other bytes.
+if [[ -z ${SOURCE_DATE_EPOCH:-} ]]; then
+    SOURCE_DATE_EPOCH=$(git -c safe.directory='*' log -1 --format=%ct) || { echo "release.sh: no commit time (git); set SOURCE_DATE_EPOCH" >&2; exit 1; }
+fi
+export SOURCE_DATE_EPOCH
+echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH (version $version)"
 
 # The configuration comes only from the defaults files: never from an earlier sdkconfig.
 rm -f build-release/sdkconfig
