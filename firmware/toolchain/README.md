@@ -28,5 +28,9 @@ toolchain/rebuild.sh firmware ubuntu dev-1234abcd path/to/SHA256SUMS   # compare
 our compilers is byte-identical to GitHub Actions' build with Espressif's compiler, all seven
 files. Our two compilers also give identical target libraries (195 files). Espressif's own
 libraries differ from ours in 21 complex-maths functions of `libm.a` (register choices; not linked
-into the firmware); their compiler was built with host GCC 6.3.0, ours with GCC 11 and 14.
+into the firmware); their compiler was built with host GCC 6.3.0, ours with GCC 11 and 14. Built
+once more on Debian 9 (`Containerfile.stretch`, host GCC 6.3.0, run `build-ubuntu.sh` in it), all
+195 target library files are byte-identical to Espressif's: the host compiler explains it. That
+build stops at picolibc (its meson needs a newer Python than Debian 9's); the compiler programs
+themselves still differ by a few KB, which would need Espressif's exact build image.
 Details: [device setup design](https://github.com/mj41/home-w42-eu/blob/main/docs/device-setup.md), §6.4.
