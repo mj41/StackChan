@@ -342,6 +342,7 @@ void AppEmbodyMode::onRunning()
             _pending_picture_jpeg.clear();
         }
 
+        update_camera_size();
         if (_camera_on && GetHAL().millis() - _last_frame_tick >= _camera_interval_ms) {
             _last_frame_tick = GetHAL().millis();
             send_camera_frame();
@@ -461,7 +462,10 @@ void AppEmbodyMode::onClose()
         temperature_sensor_uninstall(_tsens);
         _tsens = nullptr;
     }
-    _camera_on = false;
+    _camera_on     = false;
+    _camera_want_w = 320;
+    _camera_want_h = 240;
+    update_camera_size();
     if (_client) {
         GetHAL().onImuMotionEvent.disconnect(_imu_connection);
         GetHAL().onHeadPetGesture.disconnect(_head_connection);
@@ -1027,10 +1031,15 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
     } else if (command == "screensaver") {
         (args["on"] | false) ? enter_blank(true) : leave_blank();
     } else if (command == "camera") {
-        _camera_on = args["on"] | false;
+        // {"on": true, "size": "320x240" (default) | "640x480"}
+        _camera_on              = args["on"] | false;
+        const std::string size  = args["size"] | "320x240";
+        const bool full         = _camera_on && size == "640x480";
+        _camera_want_w          = full ? 640 : 320;
+        _camera_want_h          = full ? 480 : 240;
         // StackChanCamera logs a warning for every captured frame; keep the log readable.
         esp_log_level_set("StackChanCamera", _camera_on ? ESP_LOG_ERROR : ESP_LOG_INFO);
-        mclog::tagInfo(_tag, "camera {}", _camera_on ? "on" : "off");
+        mclog::tagInfo(_tag, "camera {} {}x{}", _camera_on ? "on" : "off", _camera_want_w, _camera_want_h);
     } else if (command == "mic") {
         (args["on"] | false) ? start_mic() : stop_mic();
     } else if (command == "ir_send") {
@@ -1265,13 +1274,38 @@ void AppEmbodyMode::send_camera_frame()
     uint8_t* jpeg = nullptr;
     size_t len    = 0;
     if (image_to_jpeg((uint8_t*)camera->GetFrameData(), camera->GetFrameSize(), camera->GetFrameWidth(),
-                      camera->GetFrameHeight(), (v4l2_pix_fmt_t)camera->GetFrameFormat(), _camera_jpeg_quality, &jpeg,
+                      camera->GetFrameHeight(), (v4l2_pix_fmt_t)camera->GetFrameFormat(), _camera_quality, &jpeg,
                       &len)) {
         if (jpeg) {
-            _client->sendBinary(_bin_camera_jpeg, jpeg, len);
+            if (len + 1 <= 65535) {  // one frame, one WebSocket message
+                _client->sendBinary(_bin_camera_jpeg, jpeg, len);
+            } else if (_camera_quality > 10) {  // a busy 640x480 scene: lower the quality, drop this frame
+                _camera_quality -= 5;
+                mclog::tagInfo(_tag, "camera: {} bytes per frame, quality now {}", len, _camera_quality);
+            }
             free(jpeg);
         }
     }
+}
+
+// The sensor's mode follows the "camera" command: 640x480 only while that stream is on.
+void AppEmbodyMode::update_camera_size()
+{
+    auto camera = hal_bridge::board_get_camera();
+    if (!camera || (camera->GetFrameWidth() == _camera_want_w && camera->GetFrameHeight() == _camera_want_h)) {
+        return;
+    }
+    if (camera->SetSensorSize(_camera_want_w, _camera_want_h)) {
+        for (int i = 0; i < 3; i++) {  // the first frames after a mode switch can be dark or torn
+            camera->StreamCaptures();
+        }
+    } else {
+        queue_event("camera_failed", {}, {{"reason", "the sensor did not switch to " + std::to_string(_camera_want_w) + "x" + std::to_string(_camera_want_h)}});
+        _camera_want_w = camera->GetFrameWidth();
+        _camera_want_h = camera->GetFrameHeight();
+    }
+    _camera_quality = _camera_jpeg_quality;
+    mclog::tagInfo(_tag, "camera sensor {}x{}", camera->GetFrameWidth(), camera->GetFrameHeight());
 }
 
 // Full resolution still: switch the sensor to 640x480, let it settle, grab and encode one
@@ -1609,7 +1643,10 @@ void AppEmbodyMode::start_standby(int minutes)
     _imu_streaming = false;
     GetHAL().setImuStreaming(false);
     set_light_stream(false);
-    _camera_on = false;
+    _camera_on     = false;
+    _camera_want_w = 320;
+    _camera_want_h = 240;
+    update_camera_size();
     auto& sc   = GetStackChan();
     stop_led_effect(false);
     _led_left = _led_right = 0;

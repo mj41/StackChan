@@ -231,6 +231,8 @@ private:
     // Camera: frames are captured and JPEG-encoded in the app loop while on.
     bool _camera_on           = false;
     uint32_t _last_frame_tick = 0;
+    int _camera_want_w = 320, _camera_want_h = 240;  // the stream's size ("camera" "size"); switched outside the LVGL lock
+    int _camera_quality = 25;                         // JPEG quality, lowered when a 640x480 frame does not fit a message
 
     // Microphone: a task reads the codec into _mic_samples; the app loop sends them.
     std::atomic<bool> _mic_running{false};
@@ -367,6 +369,7 @@ private:
     void stop_hold();
     void update_hold();
     void send_camera_frame();
+    void update_camera_size();
     void start_mic();
     void stop_mic();
     static void mic_task(void* arg);
