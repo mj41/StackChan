@@ -12,7 +12,7 @@ There are three ways, from one click to your own firmware:
 
 | Way | For | What it takes |
 |---|---|---|
-| [A. One click on chan.w42.eu](#a-one-click-on-chanw42eu) | everyone | Chrome or Edge, a GitHub or Google account |
+| [A. One click on sm.w42.eu](#a-one-click-on-smw42eu) | everyone | Chrome or Edge, a GitHub or Google account |
 | [B. Your own server](#b-your-own-server) | your home network, private things | Go 1.26 on a computer at home, Chrome or Edge |
 | [C. Build the firmware yourself](#c-build-the-firmware-yourself) | developers, changes to the firmware | podman or docker (or ESP-IDF 5.5.4) |
 
@@ -20,15 +20,19 @@ All of them need an **M5Stack Stackchan** robot with its CoreS3 (ESP32-S3) and a
 cable** (some cables only charge). Optional, for the car: a **micro:bit V2** and an
 **ELECFREAKS TPBot** ([Drive a TPBot car](#optional-drive-a-tpbot-car)).
 
-## A. One click on chan.w42.eu
+## A. One click on sm.w42.eu
+
+[sm.w42.eu](https://sm.w42.eu) is the Stackchan manager: it sets your robot up for the apps you
+approve, each on a host of its own ([s.w42.eu](https://s.w42.eu) lists them): the raw dashboard
+[raw.sa.w42.eu](https://raw.sa.w42.eu) and the pet [pet.sa.w42.eu](https://pet.sa.w42.eu).
 
 1. Plug the robot into your computer: the USB-C port **on the robot's head** (the CoreS3).
-2. Open [chan.w42.eu/setup](https://chan.w42.eu/setup) in **Chrome or Edge** (they have Web
+2. Open [sm.w42.eu/setup](https://sm.w42.eu/setup) in **Chrome or Edge** (they have Web
    Serial; Firefox and Safari do not) and sign in with GitHub or Google.
-3. Optional: tick **Start Embody Mode when the robot turns on** (off by default; otherwise
-   open it from the launcher), and pick the **App** it starts with when the server offers more
-   than its dashboard. In **Options**, your **Wi-Fi** name and password: they go to the robot
-   over the cable, never to the server.
+3. Tick the **apps** for your robot and pick the one it **Starts with**. Optional: tick **Start
+   Embody Mode when the robot turns on** (off by default; otherwise open it from the launcher).
+   In **Options**, your **Wi-Fi** name and password: they go to the robot over the cable, never
+   to the server.
 4. Press **Set up my robot** and pick the **USB JTAG/serial debug unit**.
 
 With **Back up the current firmware first** (on by default), the page first saves the robot's
@@ -37,21 +41,28 @@ two minutes; keep the file private, it holds the robot's old settings too). The 
 the robot's original. Options → Firmware → **Restore an earlier firmware** puts back the original
 or the previous backup (the page checks the file against the robot's record of both); older
 backups only from a terminal (`esptool.py write_flash 0x0 <file>`). Then it installs the
-latest Embody Mode firmware, adds the robot to your account with its own token, writes the server, the token and the Wi-Fi into the robot, and restarts it into
-Embody Mode. It takes about two minutes. Then:
+latest Embody Mode firmware, adds the robot to your account, writes every app you ticked with a
+token of its own, and the Wi-Fi, into the robot, and restarts it into Embody Mode; the robot
+asks on its screen before the app it starts with is set (tap **Yes**). It takes about two
+minutes. Then:
 
-- The robot connects to chan.w42.eu. It is **private**: only you, signed in, see it. Open
-  [chan.w42.eu](https://chan.w42.eu) on any device where you sign in, and it is there.
+- The robot connects to its start app; Next and Connect on its QR screen switch between your
+  apps. It is **private**: only you, signed in, see it. Open the app (e.g.
+  [raw.sa.w42.eu](https://raw.sa.w42.eu)) on any device where you sign in, and it is there.
 - Without Wi-Fi in step 3, the robot opens a hotspot first ([First start](#first-start)).
-- [chan.w42.eu/robots](https://chan.w42.eu/robots) lists your robots: make one public, give
-  it a new token, or remove it.
+- [sm.w42.eu](https://sm.w42.eu) lists your robots with their apps: make one public (its QR
+  code then pairs anyone), or remove it (its tokens stop working). To change its apps, set it
+  up again (with "Keep the robot's firmware").
 
-Everything streams through that server (a proof of concept, not reviewed), so keep private
-things on your own server (B).
+Everything streams through those servers (a proof of concept, not reviewed), so keep private
+things on your own servers (B).
 
-## B. Your own server
+## B. Your own servers
 
-1. **Run a server** on a computer in the same network as the robot:
+At home, a manager sets your robots up for your own app servers, with no sign-in: it works only
+from the computer it runs on.
+
+1. **Run the apps** on a computer in the same network as the robot, e.g. the raw dashboard:
 
    ```bash
    git clone https://github.com/mj41/s-w42-eu-raw.git
@@ -63,27 +74,41 @@ things on your own server (B).
      Keep it private.
    - It prints its address, e.g. `http://192.168.1.10:8765`. The robot and your phone must
      reach it: allow TCP port 8765 in the firewall if needed.
-   - More options (HTTPS for the browser's microphone, state file, offering other servers):
-     the server's readme, [Run](https://github.com/mj41/s-w42-eu-raw#run).
+   - More options (HTTPS for the browser's microphone, state file, a manager's tokens): the
+     server's readme, [Run](https://github.com/mj41/s-w42-eu-raw#run). The pet
+     ([s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet)) runs the same way, on port 8770.
 
-2. **Set the robot up** from the same computer: plug the robot in, open
-   `http://localhost:8765/setup` in Chrome or Edge and press **Set up my robot**. The server
-   fills in its address, its robot token and this computer's Wi-Fi, and installs the official
-   firmware (it fetches the release from GitHub). Nothing to type.
+2. **Run the manager** on the same computer, with your apps in its catalog
+   `~/.config/s-w42-eu-manager/apps.json` (its readme,
+   [The app catalog](https://github.com/mj41/s-w42-eu-manager#the-app-catalog)), e.g. with the
+   shared robot token:
 
-   - **From another computer:** on the server's computer, press **Copy setup for another
-     computer** on that page, and paste it on the other computer's setup page (Options → Server →
-     My own server), e.g. [chan.w42.eu/setup](https://chan.w42.eu/setup) (signed in, to install
-     the firmware there). It holds the robot
-     token and the Wi-Fi password: keep it private.
-   - The robot must reach the server's address: by default `ws://<LAN IP>:8765`; set another
-     with `-public-url`.
-   - Or, on a robot that already has Embody Mode, from a terminal:
-     `go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
-     then `go run ./cmd/stackchan-usb restart` (the server's readme,
-     [Set a robot up over USB](https://github.com/mj41/s-w42-eu-raw#set-a-robot-up-over-usb)).
+   ```json
+   [{"id": "raw", "name": "Raw dashboard", "url": "ws://192.168.1.10:8765", "token_file": "/home/me/.config/stackchan-server/robot-token"}]
+   ```
 
-3. Pair: the robot shows a QR code; scan it with your phone ([First start](#first-start)).
+   ```bash
+   git clone https://github.com/mj41/s-w42-eu-manager.git
+   cd s-w42-eu-manager
+   go run ./cmd/s-w42-eu-manager
+   ```
+
+3. **Set the robot up:** plug it in, open `http://localhost:8790/setup` in Chrome or Edge, tick
+   the apps and press **Set up my robot**. The manager fills in this computer's Wi-Fi and
+   installs the official firmware (it fetches the release from GitHub). Nothing to type.
+
+   - **From another computer:** on the manager's computer, press **Copy setup for another
+     computer** in Options, and paste it on the other computer's setup page (Options → Apps →
+     Setup from your server), e.g. [sm.w42.eu/setup](https://sm.w42.eu/setup) (signed in, to
+     install the firmware there). It holds the robot token and the Wi-Fi password: keep it
+     private.
+   - The robot must reach each app's address (`url` in the catalog).
+   - Or, on a robot that already has Embody Mode, from a terminal (in s-w42-eu-manager):
+     `go run ./cmd/s-w42-eu-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
+     then `go run ./cmd/s-w42-eu-usb restart` (the manager's readme,
+     [Over USB from a terminal](https://github.com/mj41/s-w42-eu-manager#over-usb-from-a-terminal-s-w42-eu-usb)).
+
+4. Pair: the robot shows a QR code; scan it with your phone ([First start](#first-start)).
 
 ## C. Build the firmware yourself
 
@@ -97,13 +122,13 @@ release.
 
 ```bash
 git clone -b embody-mj41 https://github.com/mj41/StackChan.git
-git clone https://github.com/mj41/s-w42-eu-raw.git   # the server and s-w42-eu-usb
+git clone https://github.com/mj41/s-w42-eu-manager.git   # the manager and s-w42-eu-usb
 ```
 
 ### 2. Choose how the robot gets its server
 
 - **Over USB after flashing** (simplest): nothing to configure. Set the robot up afterwards as
-  in B, step 2 (the page with "Keep the robot's firmware", or `s-w42-eu-usb`).
+  in A or B, step 3 (the page with "Keep the robot's firmware", or `s-w42-eu-usb`).
 - **Built in:** create `StackChan/firmware/sdkconfig.defaults.local` (it is gitignored,
   because it holds the token):
 
@@ -112,10 +137,9 @@ git clone https://github.com/mj41/s-w42-eu-raw.git   # the server and s-w42-eu-u
   CONFIG_STACKCHAN_EMBODY_TOKEN="<the content of ~/.config/stackchan-server/robot-token>"
   ```
 
-  For chan.w42.eu: `wss://chan.w42.eu` and the token that
-  [chan.w42.eu/robots](https://chan.w42.eu/robots) shows once when you add your robot by its
-  id (`stackchan-` and the robot's Wi-Fi MAC address in lowercase without colons, e.g.
-  `stackchan-0a1b2c3d4e50`; `s-w42-eu-usb hello` prints it, and the firmware logs it at start).
+  The robot's id is `stackchan-` and its Wi-Fi MAC address in lowercase without colons, e.g.
+  `stackchan-0a1b2c3d4e50` (`s-w42-eu-usb hello` prints it, and the firmware logs it at start).
+  The w42.eu apps take only tokens from sm.w42.eu: set such a robot up there (A).
 
   **The first build turns these into `sdkconfig`, and after that `sdkconfig` wins.** To
   change them later, edit the same lines in `firmware/sdkconfig` too (or delete `sdkconfig`
@@ -171,7 +195,7 @@ Plug the cable into the USB-C port **on the robot's head** (the CoreS3), then:
 
 ### 5. Set it up over USB
 
-Without a built-in server (step 2), set the robot up as in B, step 2: the setup page with
+Without a built-in server (step 2), set the robot up as in A or B, step 3: the setup page with
 **Keep the robot's firmware**, or `s-w42-eu-usb`.
 
 ### The official release
@@ -202,7 +226,7 @@ hashes are in [mj41cz-approved](https://gitlab.com/mj41cz/mj41cz-approved), the 
    camera, open the server's address and type the code.
    - Open the dashboard with the same host as in the QR code (the address, not
      `localhost`): the pairing belongs to that host.
-   - On chan.w42.eu your private robot needs no pairing: sign in and it is there.
+   - On the w42.eu apps your private robot needs no pairing: sign in and it is there.
 4. You see the robot's face on its screen, and its status, camera and controls in the
    browser.
 
@@ -279,10 +303,10 @@ Embody Mode, so use it only with a server you trust.
 | Flashing stops halfway | put the robot into flashing mode by hand (hold the reset button until the green LED lights up) and press the button again |
 | The robot stays on "Connecting" | the server URL and token (for built-in ones: in `sdkconfig`, not only in `sdkconfig.defaults.local`), the firewall, the same network |
 | The robot keeps restarting | after 3 crashes in a row it stops opening Embody Mode by itself and stays in the launcher; report the crash (`idf.py monitor` shows it) and restore the original firmware or install again |
-| Embody Mode says "Set up: chan.w42.eu/setup" | release firmware with no server yet: set it up over USB (A or B) |
+| Embody Mode says "Set up: sm.w42.eu/setup" | release firmware with no server yet: set it up over USB (A or B) |
 | Pairing says the code is invalid | scan again: codes are one-time and expire after 5 minutes |
 | The dashboard shows no robot after pairing | open it with the same host as in the QR code |
-| chan.w42.eu says "this robot is private" | sign in with the account that set it up, or make it public on [Your robots](https://chan.w42.eu/robots) |
+| An app says "this robot is private" | sign in with the account that set it up, or make it public on [sm.w42.eu](https://sm.w42.eu) |
 | The browser does not offer the microphone | browsers give it only to HTTPS pages: run the server with `-tls-listen :8766` and open `https://<address>:8766` |
 | After flashing by hand, nothing connects | the robot starts in the launcher: open Embody Mode |
 | Flashing from the container: "Permission denied" or "Write timeout" | `container.sh` passes the port under its own name and without SELinux labels for that run; with your own `podman run`, do the same (`--device /dev/ttyACM1:/dev/ttyACM1 --group-add keep-groups --security-opt label=disable`) |
@@ -291,9 +315,9 @@ Embody Mode, so use it only with a server you trust.
 ## Security, as it is today
 
 - **Tokens.** Set up over USB, the token lives in the robot's settings, not in the firmware
-  image. On chan.w42.eu every robot has its own token, which works only for that robot id. On
-  your own server without sign-in or `-robot-tokens-file`, robots share the server's one robot
-  token. Anyone who reads the robot's flash gets its token. Per-robot keys and owner-signed permissions are designed (the trust
+  image. Set up by a manager (sm.w42.eu), a robot has a token of its own for each app, which
+  works only for that robot id. With a shared token in a home manager's catalog, robots share
+  that app's one robot token. Anyone who reads the robot's flash gets its token. Per-robot keys and owner-signed permissions are designed (the trust
   design, [stackchan-trust.md](https://github.com/mj41/home-w42-eu/blob/main/docs/implementations/stackchan-trust.md) in
   home-w42-eu) but not built yet.
 - **Setup over USB trusts the cable,** with one tap: a new default server needs a **Yes** on

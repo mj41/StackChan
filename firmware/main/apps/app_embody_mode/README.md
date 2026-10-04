@@ -20,7 +20,7 @@ QR screen's buttons are described under [Servers](#servers).
 
 ## On the robot
 
-1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to the default server in its list ([Servers](#servers)). Without a server set up (the release firmware before its setup over USB), it shows "Set up: chan.w42.eu/setup" and contacts nothing, not even Wi-Fi.
+1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to the default server in its list ([Servers](#servers)). Without a server set up (the release firmware before its setup over USB), it shows "Set up: sm.w42.eu/setup" and contacts nothing, not even Wi-Fi.
 2. **QR code:** the screen shows the server's one-time pairing URL as a QR code, next to its 8-character code.
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
@@ -52,7 +52,7 @@ The robot keeps a **server list** in NVS (namespace `embody`): the built-in serv
 
 ## Setup over USB
 
-A computer writes servers, their tokens, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `s-w42-eu-usb` from [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
+A computer writes servers, their tokens, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [sm.w42.eu/setup](https://sm.w42.eu/setup) in Chrome, or `s-w42-eu-usb` from [s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager#over-usb-from-a-terminal-s-w42-eu-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
 
 - `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, whether automation is built in, and the `original` and `previous` firmware records when it has them.
 - `{"op":"provision","server":{"name","url","token"},"default":true,"servers":[{"name","url","token"}],"pin":"<url>","autostart":true,"wifi":{"ssid","password"},"original":{},"previous":{}}` → `{"ok":true,"applied":[…]}`. Every part is optional.
@@ -68,7 +68,7 @@ A computer writes servers, their tokens, autostart and Wi-Fi into the robot's se
   - `{"op":"tap","x","y","ms"?}`: a touch through a virtual pointer (100 ms, or longer for a long press). The first tap asks on the screen **"Let the computer on USB use the screen?"**; the Yes is kept in NVS (`embody/usb_ctrl`) until no USB host is there for a few seconds (the cable is unplugged). Taps are refused while one of the robot's own questions is open, and a press in progress is released when one opens: **only the person at the robot answers them.**
   - `{"op":"launch","app"}`: restart into a launcher app once (`"launcher"`: none); an unknown name answers with the list of apps.
 
-So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
+So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: sm.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
 
 ## Configuration
 

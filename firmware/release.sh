@@ -3,7 +3,7 @@
 # sdkconfig.defaults.release (no server or token inside: a robot gets those as settings over
 # USB), never the local overlay. Run inside ESP-IDF (the release workflow, or
 # ./container.sh release). Writes build-release/dist: the parts, manifest.json with their
-# SHA-256 (for chan.w42.eu/setup), one merged image for 0x0, SHA256SUMS.
+# SHA-256 (for sm.w42.eu/setup), one merged image for 0x0, SHA256SUMS.
 #
 #   ./release.sh [VERSION]      default: git describe of the last embody-v* tag
 set -euo pipefail

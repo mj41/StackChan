@@ -46,7 +46,7 @@ using namespace stackchan;
 
 static const char* _tag = "Embody Mode";
 
-// "wss://chan.w42.eu/x" -> "chan.w42.eu": the default name of a server entry
+// "wss://raw.sa.w42.eu/x" -> "raw.sa.w42.eu": the default name of a server entry
 static std::string host_of(const std::string& url)
 {
     auto start = url.find("://");
@@ -148,9 +148,9 @@ void AppEmbodyMode::onOpen()
     }
 
     if (!set_up) {  // nothing to contact: no Wi-Fi, no hotspot, only how to set it up
-        mclog::tagInfo(_tag, "not set up: connect over USB at chan.w42.eu/setup");
+        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu/setup");
         LvglLockGuard lock;
-        _status->setText("Not set up yet: plug me into a computer and open chan.w42.eu/setup in Chrome");
+        _status->setText("Not set up yet: plug me into a computer and open sm.w42.eu/setup in Chrome");
         return;
     }
 
@@ -2276,7 +2276,7 @@ void AppEmbodyMode::load_servers()
     // A release build has no built-in server: it is set up over USB (usb_setup.h), which
     // adds the server and makes it the default.
     const std::string builtin = CONFIG_STACKCHAN_EMBODY_SERVER_URL;
-    _servers.push_back({builtin.empty() ? "Set up: chan.w42.eu/setup" : host_of(builtin), builtin,
+    _servers.push_back({builtin.empty() ? "Set up: sm.w42.eu/setup" : host_of(builtin), builtin,
                         CONFIG_STACKCHAN_EMBODY_TOKEN, "built-in"});
     Settings settings("embody", false);
     ArduinoJson::JsonDocument doc;
@@ -2411,7 +2411,7 @@ void AppEmbodyMode::connect_server(size_t index)
     }
     index = std::min(index, _servers.size() - 1);
     if (_servers[index].url.empty()) {  // the release build's empty built-in entry: nothing to contact
-        mclog::tagInfo(_tag, "not set up: connect over USB at chan.w42.eu/setup");
+        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu/setup");
         return;
     }
     _server_index = index;
