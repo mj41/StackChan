@@ -1,0 +1,24 @@
+diff --git a/scripts/build/companion_libs/901-xtensa_esp_bin_wrappers.sh b/scripts/build/companion_libs/901-xtensa_esp_bin_wrappers.sh
+index e20042e9..6495d01c 100644
+--- a/scripts/build/companion_libs/901-xtensa_esp_bin_wrappers.sh
++++ b/scripts/build/companion_libs/901-xtensa_esp_bin_wrappers.sh
+@@ -50,6 +50,10 @@ map_triplet_to_rust() {
+ }
+ 
+ do_xtensa_esp_bin_wrappers_get() {
++    if [ -n "${CT_SYSTEM_CARGO:-}" ]; then  # a cargo from the host (Guix): no rustup download
++        CT_DoLog INFO "Using the host's cargo for the Espressif binary wrapper: ${CT_SYSTEM_CARGO}"
++        return 0
++    fi
+     CT_DoStep INFO "Installing rust for Espressif binary wrapper"
+ 
+     export RUSTUP_HOME=${CT_BUILD_DIR}/rust/rustup
+@@ -79,7 +83,7 @@ do_xtensa_esp_bin_wrappers_for_build () {
+     rust_target=$(map_triplet_to_rust ${CT_HOST})
+ 
+     CT_Pushd "${CT_XTENSA_ESP_BIN_WRAPPERS_LOCATION}"
+-    CT_DoExecLog ALL CT_DoExecLog ALL ${CT_BUILD_DIR}/rust/cargo/bin/cargo build --release --target=${rust_target} --config target.${rust_target}.linker=\"${CT_HOST}-gcc\"
++    CT_DoExecLog ALL CT_DoExecLog ALL ${CT_SYSTEM_CARGO:-${CT_BUILD_DIR}/rust/cargo/bin/cargo} build --release --target=${rust_target} --config target.${rust_target}.linker=\"${CT_HOST}-gcc\"
+     CT_Popd
+ }
+ 

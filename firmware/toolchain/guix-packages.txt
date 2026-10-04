@@ -1,0 +1,1 @@
+gcc-toolchain@14 make coreutils bash sed gawk grep findutils diffutils patch tar gzip bzip2 xz zstd unzip file which bison flex gperf help2man perl texinfo libtool autoconf automake m4 pkg-config python meson ninja ncurses git curl nss-certs rsync util-linux rust rust:cargo
