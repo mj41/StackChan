@@ -2,7 +2,7 @@
 
 To set up a robot, see [SETUP.md](SETUP.md).
 
-Launcher app (first icon) that lets you control this Stackchan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj. Setting up a robot: [SETUP.md](SETUP.md).
+Launcher app (first icon) that lets you control this Stackchan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj.
 
 > **A proof of concept, vibe coded.** Written with AI agents and tested on real hardware at
 > home, but neither the code nor its security has been reviewed by humans. Use it on your
@@ -15,18 +15,17 @@ Launcher app (first icon) that lets you control this Stackchan from a browser th
 |---|---|
 | ![Embody Mode: the robot's face with a speech bubble](screenshots/face.jpg) | ![Embody Mode: the QR screen with the pairing code](screenshots/qr-screen.jpg) |
 
-Both are the robot's own screen (320x240), taken with the `screen_snapshot` command. On
-the QR screen, **Next** browses the robot's servers, **Pin** makes this one the default,
-and **Back to app** returns to the face.
+Both are the robot's own screen (320x240), taken with the `screen_snapshot` command. The
+QR screen's buttons are described under [Servers](#servers).
 
 ## On the robot
 
-1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to `CONFIG_STACKCHAN_EMBODY_SERVER_URL`.
+1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to the default server in its list ([Servers](#servers)). Without a server set up (the release firmware before its setup over USB), it shows "Set up: chan.w42.eu/setup" and contacts nothing, not even Wi-Fi.
 2. **QR code:** the screen shows the server's one-time pairing URL as a QR code, next to its 8-character code.
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
    - **Long press:** reported as `screen_long_press {x, y}` (free for apps).
-   - **QR button:** swipe up from the bottom: next to Home, **QR** opens the pairing screen (so another viewer can pair, or to switch servers); there it reads **APP** and goes back.
+   - **QR button:** swipe up from the bottom: next to Home, **QR** opens the QR screen again (so another viewer can pair, or to switch servers; see [Servers](#servers)).
    - **Double tap:** blanks the screen (manual screensaver).
 4. **LIVE badge:** a red **LIVE** badge shows while the camera or microphone streams.
 5. **Screensaver:** the screen goes black and the previous view (face, picture or QR) comes back on wake. The LIVE badge stays visible. A "touch" below means the screen, a head press or swipe, or a new NFC tag. There are two kinds:
@@ -41,40 +40,38 @@ and **Back to app** returns to the face.
 
 ## Servers
 
-The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
+The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
-- **On the robot:** the QR screen's top row is `Pin  name n/m  Next ▶`, with a wide `✕ Close` at the bottom right. **Next** switches to the next server (the robot reconnects and shows that server's QR; the QR screen stays open), **Pin** makes the shown one the **default** used at start (blue), and tapping Pin on the default **unpins** it. With no default, Embody Mode starts as a **chooser**: it contacts nothing, Next browses, and the bottom-right button reads **Connect**.
-- **Swipe-up bar:** next to Home, **QR** opens the QR screen; while it is open the button reads **APP** and goes back to the app.
+- **QR screen:** swipe up from the bottom; next to Home, **QR** opens it, and while it is open that button reads **APP** and goes back to the app. The top row is `Pin  name n/m  Next ▶`; the bottom-right button reads **Back to app** on the connected server and **Connect** on another one.
+  - **Next** browses the list; the connection stays, and another server's code comes only after Connect.
+  - **Connect** switches to the shown server: the robot reconnects and shows that server's QR; the QR screen stays open.
+  - **Pin** makes the shown one the **default** used at start (blue); tapping Pin on the default **unpins** it.
+  - With no default, Embody Mode starts as a **chooser**: it contacts nothing until Connect.
 - **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
 
 ## Setup over USB
 
-A computer writes a server, its token, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `stackchan-usb` from [stackchan-server](https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
+A computer writes servers, their tokens, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `stackchan-usb` from [stackchan-server](https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
 
-- `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, and whether automation is built in.
-- `{"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,"wifi":{"ssid","password"}}` → the server is added to the list (origin "added") and made the default; every part is optional.
-- `{"op":"restart"}` → a restart into Embody Mode.
-- `"original"` in `provision`: the firmware the robot had before its first setup (identity and the SHA-256 of the backup the setup page saved), stored once in NVS (`embody/orig_fw`) and never replaced; `hello` returns it, so the page restores only that backup.
+- `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, whether automation is built in, and the `original` and `previous` firmware records when it has them.
+- `{"op":"provision","server":{"name","url","token"},"default":true,"servers":[{"name","url","token"}],"pin":"<url>","autostart":true,"wifi":{"ssid","password"},"original":{},"previous":{}}` → `{"ok":true,"applied":[…]}`. Every part is optional.
+  - `server` is added to the list (origin "added"), and with `default` made the default. `servers` adds more at once; `pin` makes one of them the default. `autostart` applies only with automation built in.
+  - **A new default server is confirmed on the robot:** its screen asks "Connect to …?" (Yes/No, 60 s). Without a Yes nothing is changed, and the answer is the error "not confirmed on the robot: nothing changed". Other servers, Wi-Fi and autostart need no tap.
+  - `original`: the firmware the robot had before its first setup (identity and the SHA-256 of the backup the setup page saved), stored once in NVS (`embody/orig_fw`) and never replaced.
+  - `previous`: the firmware it had before the latest setup with a backup (NVS `embody/prev_fw`), replaced each time.
+  - With these two records, the setup page restores the original or the previous backup, after checking the file's SHA-256. Older backups go back with `esptool.py write_flash 0x0 <file>`.
+- `{"op":"pair"}` → `{"ok":true,"url"}`: the pairing link Embody Mode shows now (an error while it has none). The setup page opens it, so the computer that set the robot up is paired at once.
+- `{"op":"restart"}` → a restart, into Embody Mode when automation is built in.
 
 So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
 
 ## Configuration
 
-For your own builds, the Kconfig menu "Embody Mode" (`main/Kconfig.projbuild`) has a built-in server, set in `firmware/sdkconfig.defaults.local`. That file is gitignored because it holds the token; leave both empty to set the robot up over USB instead. The release build never reads that file (`sdkconfig.defaults.release`):
+For your own builds, the Kconfig menu "Embody Mode" (`main/Kconfig.projbuild`) has these options. Set them in `firmware/sdkconfig.defaults.local` (gitignored, because it can hold a token); how, and why `sdkconfig` wins after the first build: [SETUP.md, C.2](SETUP.md#2-choose-how-the-robot-gets-its-server). The release build never reads that file (`sdkconfig.defaults.release`).
 
-```
-CONFIG_STACKCHAN_EMBODY_SERVER_URL="ws://192.168.1.10:8765"   # or wss://chan.w42.eu
-CONFIG_STACKCHAN_EMBODY_TOKEN="<the server's robot-token file>"
-```
-
-- **Existing `sdkconfig` wins:** defaults files only fill options missing from the existing `sdkconfig`. After changing the overlay, edit the same lines in `sdkconfig` too.
-- **Reconfigure first:** after adding sources or Kconfig options, run `idf.py reconfigure` before `idf.py build`.
-
-The robot ID is `stackchan-<factory MAC, lowercase>`.
-
-Other options in the same menu:
-
+- `CONFIG_STACKCHAN_EMBODY_SERVER_URL`, `CONFIG_STACKCHAN_EMBODY_TOKEN`: the built-in server and its token, first in the server list. Empty by default and in the release build: the robot is then set up over USB.
 - `CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S`: seconds without touch before the screen blanks. Default 60; 0 disables it.
+- `CONFIG_STACKCHAN_EMBODY_CAR`: the optional TPBot car. Default on; it stays off until `car_enable` ([What it does](#what-it-does)).
 - `CONFIG_STACKCHAN_EMBODY_ONLY`: the launcher installs only Embody Mode and SETUP, and ignores "start AI.AGENT on boot". Default off.
 - `CONFIG_STACKCHAN_EMBODY_AUTOMATION`: lets a server, or an AI agent through it, run the robot without anyone touching it. **Default off** in your own builds; without it none of this is compiled in. **On in the release build**, so the setup over USB can turn autostart on. With it, the robot lists three more commands ([automation.h](automation.h), the launcher's `check_boot_app`):
   - `automation {"autostart": bool}`: open Embody Mode after every power-on or restart. Stored on the robot and **off until a server sets it**; the robot reports it as the `automation {autostart}` event after it registers.
@@ -82,6 +79,8 @@ Other options in the same menu:
   - `launch {"app": "<name>"}`: restart into another launcher app once, by its launcher name (`AVATAR`, `AI.AGENT`, `DANCE`, `SETUP`…; `""` = stay in the launcher). An unknown name gives a `launch_unknown {app}` event. A server cannot reach the robot inside another app; a restart (or autostart after a power cycle) brings it back.
   - Home in Embody Mode still leaves the robot in the launcher: autostart applies only to a power-on or a restart, never to the way back from an app. AI.AGENT's own "start on boot" setting wins over autostart.
   - **Boot-loop guard** ([boot_guard.cpp](boot_guard.cpp)): crash restarts in a row (panic, watchdog) are counted in RTC memory; after 3, neither autostart nor a one-time launch opens an app, and the robot stays in the launcher. A normal boot, or a minute in Embody Mode, counts from zero again.
+
+After adding sources or Kconfig options, run `idf.py reconfigure` before `idf.py build`. The robot ID is `stackchan-<factory MAC, lowercase>`.
 
 ## What it does
 
@@ -103,7 +102,7 @@ Other options in the same menu:
 | Rotation, servo power | `rotate {velocity, seconds}`: yaw in wheel mode (`Servo::rotate`) for 1–30 s with auto torque release off. The first one asks on the robot's screen ("Turn the head round?", 30 s, event `rotate_asking`): Yes starts it (`rotate_confirmed`), No or no answer refuses (`rotate_refused`); the Yes holds until a USB cable is plugged in or out or the app closes. Torque is switched on first (it is off after a start). Stops when the head stops turning (the raw position moves under 2 steps per 200 ms for 0.6 s, after 0.6 s of start-up: held or blocked; the servo's load reads only the commanded drive in wheel mode, and its current reads 0) and on a cable plugged in (`rotate_stopped`); every rotation ends with `rotate_trace {samples}` (`ms:position:speed:current:load;` every 200 ms) for tuning, on any other head command, standby, close; refused with servo power off. `servo_power {on}` switches the PY32 servo supply |
 | Power LED | `power_led {"mode"}`: the AXP2101 CHGLED (reg 0x69): off, blink (1 Hz), fast (4 Hz), on (the boot default), charging (the charger drives it) |
 | NFC | `hal/drivers/ST25R3916`: a minimal ISO14443A reader ported from M5Stack's UiFlow2 driver (MIT). A FreeRTOS task (priority 1, core 1) polls twice a second with the RF field on only for the ~30 ms of each poll; the chip's IRQ pin isn't wired on StackChan. It reads 4- and 7-byte UIDs and, for Type 2 tags (NTAG, Ultralight), the first NDEF record (URI or text). It stops during standby. `nfc {"on"}` switches polling (on by default) |
-| TPBot car (optional) | `car_ble.{h,cpp}`: a NimBLE central for an ELECFREAKS TPBot whose micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble). Compiled in with `CONFIG_STACKCHAN_EMBODY_CAR` (default y), but **off until `car_enable {"on": true}`** (kept in NVS, `embody/car_on`). Only then does BLE start and the robot register again with `car_drive {left, right}`, `car_stop`, `car_servo {port, angle}`, `car_headlights {color}`, `car_sonar {hz}`, `car_watchdog {ms}`, `car_board {board: v1/v2/both}` (NVS `car_board`, default v1) and the telemetry `car_connected`, `car_rssi_dbm`, `car_echo_us`, `car_line_l/r`, `car_btn_a/b`, `car_left/right`, `car_watchdog_stop`, `car_uptime_ms`, `car_i2c_errors`, `car_board`. These are the same names as `tpbot-bridge` uses (sbot readme, "Car capability"). It scans passively (60 ms in 200 ms, to leave the radio to Wi-Fi) for `TPB-*`, connects, subscribes to the state, and sends the state as telemetry at most every 50 ms. **Car commands take a fast path:** `car_*` commands (except `car_enable` and `car_board`) are handled in the WebSocket's receive task and written to BLE at once (`Client::onFastCommand`), not queued for the app loop, which can be busy for hundreds of ms with camera frames and drawing. Command to telemetry echo: 185–285 ms, with or without the camera streaming (was ~0.8 s with the camera on), 2026-10-02. Events `car_connected` / `car_disconnected {reason}` (with `car`, `addr`). The motors stop on every new link, when the server connection drops, and on close; the micro:bit's own watchdog stops them 500 ms after the last `car_drive` |
+| TPBot car (optional) | `car_ble.{h,cpp}`: a NimBLE central for an ELECFREAKS TPBot whose micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble). Compiled in with `CONFIG_STACKCHAN_EMBODY_CAR` (default y), but **off until `car_enable {"on": true}`** (kept in NVS, `embody/car_on`). Only then does BLE start and the robot register again with `car_drive {left, right}`, `car_stop`, `car_servo {port, angle}`, `car_headlights {color}`, `car_sonar {hz}`, `car_watchdog {ms}`, `car_board {board: v1/v2/both}` (NVS `car_board`, default v1) and the telemetry `car_connected`, `car_rssi_dbm`, `car_echo_us`, `car_line_l/r`, `car_btn_a/b`, `car_left/right`, `car_watchdog_stop`, `car_uptime_ms`, `car_i2c_errors`, `car_board`. These are the same names as `tpbot-bridge` uses (sbot readme, "Car capability"). It scans passively (60 ms in 200 ms, to leave the radio to Wi-Fi) for `TPB-*`, connects, subscribes to the state, and sends the state as telemetry at most every 50 ms. **Car commands take a fast path:** `car_*` commands (except `car_enable` and `car_board`) are handled in the WebSocket's receive task and written to BLE at once (`Client::onFastCommand`), not queued for the app loop, which can be busy for hundreds of ms with camera frames and drawing. Command to telemetry echo: 185–285 ms, with or without the camera streaming. Events `car_connected` / `car_disconnected {reason}` (with `car`, `addr`). The motors stop on every new link, when the server connection drops, and on close; the micro:bit's own watchdog stops them 500 ms after the last `car_drive` |
 | Telemetry (every 2 s) | battery, charging, head yaw/pitch, Wi-Fi RSSI, free heap, uptime, brightness, volume, screensaver (0/1/2); sensors: `imu_ax_g`/`imu_ay_g`/`imu_az_g` and `imu_gyro_dps` (HAL snapshot, 10 Hz), `mag_x/y/z_ut`, `mag_raw_x/y/z`, `mag_rhall` (BMM150 through the BMI270's AUX interface), `yaw_`/`pitch_load_pct` and `_temp_c` plus `servo_voltage_v` (one servo feedback read per servo, in the app loop that owns the servo bus), `chip_temp_c` (ESP32-S3 sensor), `light_lux`, `proximity` (0–2047, only while on), `proximity_on`, `auto_brightness` (0/1) |
 | Events | IMU shake, head-touch press (zones `z0`–`z2`, 0–3) / release (`ms`) and swipes, screen taps, screensaver on/off, standby, `nfc_tag {uid, type, atqa, sak, text}` and `nfc_removed {uid}` (after two missed polls) |
 
@@ -113,6 +112,13 @@ Other options in the same menu:
   - It runs from the app loop the way `hal/hal_ws_avatar.cpp` does. Incoming frames are queued by the socket task and handled in `update()`.
   - It reconnects with backoff from 1 s up to 30 s.
 - `car_ble.{h,cpp}`: the optional TPBot car (NimBLE central). NimBLE callbacks run in its host task and only update mutex-protected state; the app loop polls it.
+- `usb_setup.{h,cpp}`: [setup over USB](#setup-over-usb), a task on the USB serial port for the whole uptime.
+- `confirm_dialog.{h,cpp}`: a Yes/No question on the robot's screen, above any app, with a timeout: for a new default server over USB and the first `rotate`.
+- `boot_guard.cpp`: the crash-restart counter in RTC memory behind the boot-loop guard.
+- `e2e.{h,cpp}`: per-server end-to-end encryption with the browsers enrolled through the QR code ([e2ee.md](https://github.com/mj41/home-w42-eu/blob/main/docs/e2ee.md)); keys in NVS `embody_e2e`, turned on per server with `server_e2e {server?, on}`. When it is on, plaintext commands other than stream switches (`camera`, `mic`, `imu_stream`, `touch_stream`, `light_stream`) and plaintext binary messages are refused.
+- `asset_store.{h,cpp}`: files a server uploads in chunks (binary `0x11`: pictures, sounds), kept in the `userdata` FAT partition at `/user` (about 1.9 MB); they survive reboots and firmware updates.
+- `sprite_layer.{h,cpp}`: stored pictures over the face (`sprite`), each with a position, scale, rotation, opacity and stacking order, moved by LVGL animations; taps on sprites marked `tap` are reported.
+- `automation.h`: autostart, the one-time launch and the boot-loop guard's limit, shared by the launcher and Embody Mode.
 - `app_embody_mode.{h,cpp}`: UI, commands, motion gestures, pictures, camera and microphone.
   - Commands and pictures are queued during `update()` and applied under the LVGL lock.
   - Events from HAL tasks, the NFC task and LVGL callbacks go through a mutex-protected queue. Event data can hold numbers and strings.
@@ -120,5 +126,6 @@ Other options in the same menu:
 ## Notes
 
 - **Launcher order:** this app is launcher index 0 and AI.AGENT is 1. Other apps return via hardcoded `requestWarmReboot(<index>)` values, which are +1 compared with upstream.
-- **Update hole closed:** `patches/xiaozhi-esp32.patch` disables xiaozhi's OTA server check (`CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK`, off). Firmware is never installed from a server.
+- **No firmware from a server:** xiaozhi's OTA check is off (`CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK`); see the trust design, [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md).
 - **Send limit:** xiaozhi's `WebSocket::Send` rejects messages over 65,535 bytes. That limits camera frames, not pictures, which the robot only receives.
+- **Wi-Fi power save:** off while in use (2 minutes after the last command, or while the camera or microphone streams), on otherwise. The first command after a quiet spell can wait up to about 100 ms for the next beacon.

@@ -24,7 +24,7 @@ toolchain/rebuild.sh firmware ubuntu dev-1234abcd path/to/SHA256SUMS   # compare
 - Work files go to `WORK` (default `~/.cache/stackchan-toolchain`): the checkouts, the source
   tarballs (shared by both builds), Guix's store (about 3 GB).
 
-**Result (2026-10-04),** for the release of commit `dc0a017`: the firmware built with either of
+**Result,** for commit `dc0a017` (before embody-v0.1.0): the firmware built with either of
 our compilers is byte-identical to GitHub Actions' build with Espressif's compiler, all seven
 files. Our two compilers also give identical target libraries (195 files). Espressif's own
 libraries differ from ours in 21 complex-maths functions of `libm.a` (register choices; not linked
@@ -33,4 +33,7 @@ once more on Debian 9 (`Containerfile.stretch`, host GCC 6.3.0, run `build-ubunt
 195 target library files are byte-identical to Espressif's: the host compiler explains it. That
 build stops at picolibc (its meson needs a newer Python than Debian 9's); the compiler programs
 themselves still differ by a few KB, which would need Espressif's exact build image.
+
+The release embody-v0.1.0 (`7a7cfb7`) was checked by CI, the owner's laptop and a cloud rebuild,
+with identical bytes ([mj41cz-approved](https://gitlab.com/mj41cz/mj41cz-approved)).
 Details: [device setup design](https://github.com/mj41/home-w42-eu/blob/main/docs/device-setup.md), §6.4.

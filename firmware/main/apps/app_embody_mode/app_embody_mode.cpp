@@ -1996,8 +1996,8 @@ void AppEmbodyMode::start_rotate(int velocity, int seconds)
     mclog::tagInfo(_tag, "rotate {} for {} s", velocity, seconds);
 }
 
-// While rotating: the yaw servo's load every 200 ms; high for 0.6 s (a cable winding up, the head
-// held or blocked) stops the rotation.
+// While rotating: the yaw servo's raw position every 200 ms. Moving under 2 steps per 200 ms for
+// 0.6 s, after 0.6 s of start-up (the head held or blocked, a cable winding up), stops the rotation.
 void AppEmbodyMode::check_rotate_safety()
 {
     const uint32_t now = GetHAL().millis();

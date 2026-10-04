@@ -1,8 +1,5 @@
 # Setting up a Stackchan with Embody Mode
 
-**Status:** 2026-10-03. Written while doing it on one M5Stack Stackchan robot (CoreS3), from a
-Fedora laptop with Chrome and podman.
-
 Embody Mode makes the robot a light client of a server you choose: you see through its
 camera, hear through its microphone, speak through its speaker, read every sensor and
 move it, from a browser. The robot can switch between servers and apps: the full
@@ -37,8 +34,9 @@ cable** (some cables only charge). Optional, for the car: a **micro:bit V2** and
 With **Back up the current firmware first** (on by default), the page first saves the robot's
 current firmware to your computer, where the browser keeps downloads (e.g. `~/Downloads`; about
 two minutes; keep the file private, it holds the robot's old settings too). The first backup is
-the robot's original: Options → Firmware → **Restore the original firmware** puts the robot back
-as it was. Later backups can be put back from a terminal (`esptool.py write_flash 0x0 <file>`). Then it installs the
+the robot's original. Options → Firmware → **Restore an earlier firmware** puts back the original
+or the previous backup (the page checks the file against the robot's record of both); older
+backups only from a terminal (`esptool.py write_flash 0x0 <file>`). Then it installs the
 latest Embody Mode firmware, adds the robot to your account with its own token, writes the server, the token and the Wi-Fi into the robot, and restarts it into
 Embody Mode. It takes about two minutes. Then:
 
@@ -181,9 +179,15 @@ Without a built-in server (step 2), set the robot up as in B, step 2: the setup 
 Pushing an `embody-v*` tag makes GitHub build the release: `sdkconfig.defaults` plus
 `sdkconfig.defaults.release` (no server, no token, automation on), never
 `sdkconfig.defaults.local`. It attaches the parts, `manifest.json` with their SHA-256 and one
-merged image to the release; servers give those to `/setup` with `-firmware-dir`.
+merged image to the release. A server's `/setup` installs the latest GitHub release by default
+(`-firmware-release latest`); `-firmware-dir` serves those files from a directory instead.
 `./container.sh release` runs the same script, `firmware/release.sh`, locally (into `firmware/build-release/dist`), to
 check it before tagging.
+
+The release is reproducible: CI, a laptop and a cloud rebuild give the same bytes. The signed
+hashes are in [mj41cz-approved](https://gitlab.com/mj41cz/mj41cz-approved), the rebuild logs in
+[mj41cz-rebuilds](https://gitlab.com/mj41cz/mj41cz-rebuilds); details in the
+[device setup design](https://github.com/mj41/home-w42-eu/blob/main/docs/device-setup.md), section 6.
 
 ## First start
 
@@ -258,8 +262,8 @@ The robot then accepts three more commands from its server: `automation {"autost
 (restart into another app once). Home in Embody Mode still leaves the robot in the launcher.
 Details: the [Embody Mode README](README.md#configuration).
 
-- **Release firmware (A, B):** built in. The setup over USB turns autostart on, so the robot
-  comes back into Embody Mode after a power cycle.
+- **Release firmware (A, B):** built in. The setup page can turn autostart on (**Start Embody
+  Mode when the robot turns on**), so the robot comes back into Embody Mode after a power cycle.
 - **Your own build (C):** off by default. Add `CONFIG_STACKCHAN_EMBODY_AUTOMATION=y` to
   `sdkconfig` (and to `sdkconfig.defaults.local`), build and flash.
 
@@ -271,7 +275,7 @@ Embody Mode, so use it only with a server you trust.
 | Problem | Try |
 |---|---|
 | The setup page offers no device | a data cable (not a charging-only one), in the head's USB-C port; close other programs on the port (`idf.py monitor`, `stackchan-usb`); on Linux, the `dialout` group |
-| The setup page: "The robot did not answer" | press the robot's reset button and try again; with "Keep the robot's firmware", the robot needs firmware with setup over USB (2026-10 or newer) |
+| The setup page: "The robot did not answer" | press the robot's reset button and try again; with "Keep the robot's firmware", the robot needs firmware with setup over USB (embody-v0.1.0 or newer) |
 | Flashing stops halfway | put the robot into flashing mode by hand (hold the reset button until the green LED lights up) and press the button again |
 | The robot stays on "Connecting" | the server URL and token (for built-in ones: in `sdkconfig`, not only in `sdkconfig.defaults.local`), the firewall, the same network |
 | The robot keeps restarting | after 3 crashes in a row it stops opening Embody Mode by itself and stays in the launcher; report the crash (`idf.py monitor` shows it) and restore the original firmware or install again |
@@ -288,12 +292,16 @@ Embody Mode, so use it only with a server you trust.
 
 - **Tokens.** Set up over USB, the token lives in the robot's settings, not in the firmware
   image. On chan.w42.eu every robot has its own token, which works only for that robot id. On
-  your own server, robots share the server's one robot token. Anyone who reads the robot's
-  flash gets its token. Per-robot keys and owner-signed permissions are designed (the trust
+  your own server without sign-in or `-robot-tokens-file`, robots share the server's one robot
+  token. Anyone who reads the robot's flash gets its token. Per-robot keys and owner-signed permissions are designed (the trust
   design, [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in
   stackchan-mj) but not built yet.
-- **Setup over USB trusts the cable:** anything on the robot's USB port can change its
-  server. Having the robot in hand is the proof of ownership, as with its QR code.
+- **Setup over USB trusts the cable,** with one tap: a new default server needs a **Yes** on
+  the robot's screen ("Connect to …?"); Wi-Fi, autostart and servers that are not the default
+  need no tap. Having the robot in hand is the proof of ownership, as with its QR code.
+- **End-to-end encryption:** when it is on for a server, the relay carries only ciphertext
+  between the robot and the browsers enrolled through its QR code
+  ([e2ee.md](https://github.com/mj41/home-w42-eu/blob/main/docs/e2ee.md)).
 - **Use your own server on your own network** for anything private. Camera and
   microphone stream only while a paired browser watches or listens, and the robot shows
   it.
