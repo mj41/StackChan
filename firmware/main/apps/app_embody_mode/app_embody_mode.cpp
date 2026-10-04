@@ -975,9 +975,12 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         int pitch = std::clamp((int)((args["pitch"] | 45.0f) * 10), _pitch_min, _pitch_max);
         motion.moveWithSpeed(yaw, pitch, _motion_speed);
     } else if (command == "home") {
+        // Facing forward again (yaw 0), the head's tilt kept: the stock goHome also sets pitch 0,
+        // the lowest position.
         pause_angle_sync();
         _gesture = nullptr;
-        motion.goHome(_motion_speed);
+        motion.moveYawWithSpeed(0, _motion_speed);
+        motion.movePitchWithSpeed(std::clamp(motion.getCurrentPitchAngle(), _pitch_min, _pitch_max), _motion_speed);
     } else if (command == "emotion") {
         static const std::pair<const char*, avatar::Emotion> emotions[] = {
             {"neutral", avatar::Emotion::Neutral}, {"happy", avatar::Emotion::Happy},
@@ -2022,6 +2025,11 @@ void AppEmbodyMode::stop_rotate()
     _rotate_until = 0;
     auto& m       = GetStackChan().motion();
     m.yawServo().rotate(0);
+    // Wheel mode left the motion animation at the angle from before the rotation: start it
+    // from where the head really is, or the next move jumps there at the servo's full speed.
+    m.yawServo().setAutoAngleSyncEnabled(true);
+    m.yawServo().move(m.yawServo().getCurrentAngle());
+    m.yawServo().setAutoAngleSyncEnabled(!_angle_sync_paused);
     m.setAutoTorqueReleaseEnabled(!_hold_until);
     _last_motion_tick = GetHAL().millis();
     queue_event("rotate_off");
