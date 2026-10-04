@@ -57,7 +57,7 @@ guix_store() {  # Guix's binary release, its signature checked, unpacked into WO
 
 guix_run() {  # a command in the Guix container (seccomp off for guix-daemon's personality())
     local g=$WORK/guix
-    podman run --rm --security-opt seccomp=unconfined --security-opt label=disable \
+    podman run --rm --security-opt seccomp=unconfined --security-opt label=disable -e "CT_JOBS=${CT_JOBS:-6}" \
         -v "$g/root/gnu:/gnu" -v "$g/root/var/guix:/var/guix" -v "$HERE:/t:ro" \
         -v "$HERE/guix-env.sh:/guix-env.sh:ro" -v "$HERE/guix-packages.txt:/packages.txt:ro" \
         -v "$WORK:/w" -v "$WORK/ctng-guix:$CTNG_PATH" stackchan-ctng-build /guix-env.sh "$@"
@@ -67,7 +67,7 @@ case ${1:-} in
     ubuntu)
         image
         checkout ubuntu
-        podman run --rm --security-opt label=disable -v "$HERE:/t:ro" -v "$WORK:/w" \
+        podman run --rm --security-opt label=disable -e "CT_JOBS=${CT_JOBS:-6}" -v "$HERE:/t:ro" -v "$WORK:/w" \
             -v "$WORK/ctng-ubuntu:$CTNG_PATH" stackchan-ctng-build bash /t/build-ubuntu.sh
         ;;
     guix)

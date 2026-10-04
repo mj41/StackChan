@@ -4,7 +4,10 @@
 # the tarballs saved by the level-2 build, so both builds compile the same bytes.
 set -euxo pipefail
 export PATH=/var/guix/profiles/per-user/root/current-guix/bin:$PATH
-exec guix shell --pure $(cat /packages.txt) -- bash -euxo pipefail -c '
+# GUIX_SHELL_FLAGS: e.g. --no-substitutes (everything from Guix's seed); CT_JOBS: parallel jobs
+# (default: all CPUs).
+export CT_JOBS=${CT_JOBS:-}
+exec guix shell --pure ${GUIX_SHELL_FLAGS:-} --preserve='^CT_JOBS$' $(cat /packages.txt) -- bash -euxo pipefail -c '
 export CONFIG_SHELL=$(command -v bash) SHELL=$(command -v bash)
 export CT_SYSTEM_CARGO=$(command -v cargo)
 # crosstool-NG refuses LIBRARY_PATH (its cross compiler would see it too). Guix'"'"'s host gcc
@@ -47,7 +50,7 @@ CT_LOG_TO_FILE=y
 CT_ALLOW_BUILD_AS_ROOT=y
 CT_ALLOW_BUILD_AS_ROOT_SURE=y
 CT_CONNECT_TIMEOUT=30
-CT_PARALLEL_JOBS=6
+CT_PARALLEL_JOBS=${CT_JOBS:-$(nproc)}
 CT_LOCAL_TARBALLS_DIR="/w/tarballs"
 CT_SAVE_TARBALLS=n
 CFG
