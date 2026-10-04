@@ -14,6 +14,11 @@
 >
 > **A proof of concept, vibe coded:** written with AI agents and tested on a real robot at home,
 > but neither the code nor its security has been reviewed by humans. Use it on your own network.
+>
+> **Early stage: no backward compatibility.** Protocols, APIs, file formats and stored settings
+> change when something better comes along, without migrations: update the robot's firmware
+> and the servers together.
+>
 > **Want more?** Ask in [home-w42-eu's issues](https://github.com/mj41/home-w42-eu/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
 > mj41 codes for attention food.
 >
