@@ -416,6 +416,7 @@ void AppEmbodyMode::onRunning()
     if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
         stop_rotate();
     }
+    check_rotate_safety();
     update_touch();
     render();
     update_standby();
@@ -1147,9 +1148,11 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         GetHAL().setServoPowerEnabled(_servo_power);
         queue_event(_servo_power ? "servo_power_on" : "servo_power_off");
     } else if (command == "rotate") {
-        // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true}; velocity 0 stops
+        // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true, "usb_power_ok": true};
+        // velocity 0 stops
         const int velocity = args["velocity"] | 0;
-        velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false) : stop_rotate();
+        velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false, args["usb_power_ok"] | false)
+                 : stop_rotate();
     } else if (command == "assets") {
         send_asset_list();
     } else if (command == "screen_snapshot") {
@@ -1867,10 +1870,17 @@ void AppEmbodyMode::set_light_stream(bool on)
 
 /* -------------------------------- Rotation -------------------------------- */
 
-void AppEmbodyMode::start_rotate(int velocity, int seconds, bool noHeadCable)
+void AppEmbodyMode::start_rotate(int velocity, int seconds, bool noHeadCable, bool usbPowerOk)
 {
     if (!noHeadCable) {
         queue_event("rotate_refused", {}, {{"reason", "confirm that no cable is in the head's USB-C (no_head_cable)"}});
+        return;
+    }
+    // USB power in: the robot cannot tell the head's USB-C from the stand's, so a second, explicit
+    // confirmation that the cable is in the stand.
+    hal_bridge::PmicStatus pmic;
+    if (!usbPowerOk && hal_bridge::board_get_pmic_status(pmic) && pmic.vbus_mv > 1000) {
+        queue_event("rotate_refused", {}, {{"reason", "USB power is in: confirm the cable is in the stand, not the head (usb_power_ok)"}});
         return;
     }
     if (!_servo_power) {
@@ -1887,10 +1897,39 @@ void AppEmbodyMode::start_rotate(int velocity, int seconds, bool noHeadCable)
     m.yawServo().rotate(velocity);
     const bool was_rotating = _rotate_until != 0;
     _rotate_until           = std::max<uint32_t>(GetHAL().millis() + seconds * 1000u, 1);
+    _rotate_check_ms        = GetHAL().millis();
+    _rotate_stall_ms        = 0;
     if (!was_rotating) {
         queue_event("rotate_on", {{"velocity", (double)velocity}, {"seconds", (double)seconds}});
     }
     mclog::tagInfo(_tag, "rotate {} for {} s", velocity, seconds);
+}
+
+// While rotating: the yaw servo's load every 200 ms; high for 0.6 s (a cable winding up, the head
+// held or blocked) stops the rotation.
+void AppEmbodyMode::check_rotate_safety()
+{
+    const uint32_t now = GetHAL().millis();
+    if (!_rotate_until || now - _rotate_check_ms < 200) {
+        return;
+    }
+    _rotate_check_ms = now;
+    ServoStatus_t servo;
+    if (!GetHAL().readServoStatus(1, servo)) {
+        return;
+    }
+    const float load = std::abs(servo.load / 10.0f);  // percent
+    if (load < 80.0f) {
+        _rotate_stall_ms = 0;
+        return;
+    }
+    if (!_rotate_stall_ms) {
+        _rotate_stall_ms = now;
+    } else if (now - _rotate_stall_ms >= 600) {
+        stop_rotate();
+        queue_event("rotate_stopped", {{"load_pct", load}}, {{"reason", "stall: high servo load"}});
+        mclog::tagWarn(_tag, "rotate stopped: yaw load {:.0f}%", load);
+    }
 }
 
 void AppEmbodyMode::stop_rotate()
@@ -2025,6 +2064,10 @@ void AppEmbodyMode::update_power_events()
     }
     if (ev & 0x80) {
         queue_event("usb_plugged");
+        if (_rotate_until) {  // a cable plugged in while the head turns: stop at once
+            stop_rotate();
+            queue_event("rotate_stopped", {}, {{"reason", "usb plugged in"}});
+        }
     }
     if (ev & 0x40) {
         queue_event("usb_unplugged");

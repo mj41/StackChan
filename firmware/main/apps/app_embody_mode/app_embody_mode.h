@@ -151,6 +151,8 @@ private:
     bool _e2e_ok = false;
     bool _boot_stable = false;  // ran a minute: the boot-loop guard counts from zero again
     bool _wifi_low_latency = false;  // Wi-Fi power save off while someone uses the robot
+    uint32_t _rotate_check_ms = 0;   // rotation: last servo load check
+    uint32_t _rotate_stall_ms = 0;   // rotation: since when the yaw load is high (0: not)
     uint32_t _ps_seen_commands = 0;  // the client's command count when power save last looked
     uint32_t _last_command_ms = 0;   // when a command last arrived (any, ping too)
     std::string _published_pair;  // the pairing link given to the USB setup ({"op":"pair"})
@@ -341,7 +343,8 @@ private:
     int find_server(const std::string& key);
     static void on_server_nav(lv_event_t* e);
     void send_imu_stream();
-    void start_rotate(int velocity, int seconds, bool noHeadCable);
+    void start_rotate(int velocity, int seconds, bool noHeadCable, bool usbPowerOk);
+    void check_rotate_safety();
     void stop_rotate();
     void update_touch();
     void take_snapshot();
