@@ -18,7 +18,7 @@ namespace embody {
  *        through the QR code, so a relay carries only ciphertext.
  *
  * Design and threat model: home-w42-eu docs/e2ee.md. Reference implementation and test
- * vectors: stackchan-server's e2e package (selfTest() checks this code against them).
+ * vectors: s-w42-eu-raw's e2e package (selfTest() checks this code against them).
  * mbedtls only: X25519, HKDF-SHA256 (from HMAC), HMAC-SHA256, AES-256-GCM (hardware AES).
  * The robot key and the enrolled browsers are kept in NVS ("embody_e2e").
  */

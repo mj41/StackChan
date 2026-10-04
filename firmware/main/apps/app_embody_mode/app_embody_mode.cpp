@@ -89,7 +89,7 @@ static constexpr AppEmbodyMode::GestureStep _nod[]   = {{'p', -120}, {'p', 100},
 static constexpr AppEmbodyMode::GestureStep _shake[] = {{'y', -150}, {'y', 150}, {'y', -150}, {'y', 0}};
 static constexpr uint32_t _gesture_step_ms           = 260;
 
-// Binary message types (stackchan-server internal/wire)
+// Binary message types (s-w42-eu-raw internal/wire)
 static constexpr uint8_t _bin_camera_jpeg = 0x01;
 static constexpr uint8_t _bin_audio_multi = 0x04;  // rate, channel count, interleaved PCM
 static constexpr uint8_t _bin_imu         = 0x05;  // count, then (uint32 ms, 9 x float32) per sample

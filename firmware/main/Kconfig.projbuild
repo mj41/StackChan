@@ -1011,7 +1011,7 @@ config STACKCHAN_EMBODY_SERVER_URL
     string "Embody server base URL"
     default ""
     help
-        Base URL of stackchan-server (ws:// or wss://, no trailing slash),
+        Base URL of s-w42-eu-raw (ws:// or wss://, no trailing slash),
         e.g. ws://192.168.1.10:8765. Empty disables Embody Mode networking.
         Set it in sdkconfig.defaults.local.
 
@@ -1076,6 +1076,6 @@ config STACKCHAN_XIAOZHI_OTA_CHECK
         When disabled, AI.AGENT uses the protocol settings stored by its last
         successful check and never downloads assets from that server.
         Firmware offered by the OTA server is never installed either way:
-        firmware comes only from its owner (see stackchan-mj/docs/design.md).
+        firmware comes only from its owner (see home-w42-eu docs/implementations/stackchan-trust.md).
 
 endmenu

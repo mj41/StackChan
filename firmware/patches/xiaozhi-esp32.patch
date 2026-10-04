@@ -341,7 +341,7 @@ index 7cd7ba0..b720a23 100644
 -            return true;
 -        });
 +    // StackChan: no "self.upgrade_firmware" tool. It let the server install firmware
-+    // from any URL; firmware comes only from its owner (stackchan-mj/docs/design.md).
++    // from any URL; firmware comes only from its owner (home-w42-eu stackchan-trust.md).
  
      // Display control
  #ifdef HAVE_LVGL

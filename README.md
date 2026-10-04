@@ -7,9 +7,8 @@
 > [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md),
 > and to set a robot up: one click in Chrome at [chan.w42.eu/setup](https://chan.w42.eu/setup), or your own
 > server or build: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
-> The servers are [stackchan-server](https://github.com/mj41/stackchan-server), [stackchan-pet](https://github.com/mj41/stackchan-pet)
-> and [sbot](https://github.com/mj41/sbot); the car's micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble); notes and scripts
-> are in [stackchan-mj](https://github.com/mj41/stackchan-mj). All of them are part of
+> The servers are [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw), [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet)
+> and [s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot); the car's micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble). All of them are part of
 > [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first, privacy first platform for a home.
 >
 > **A proof of concept, vibe coded:** written with AI agents and tested on a real robot at home,
@@ -56,3 +55,5 @@ Thank you to the contributors of the StackChan community, especially:
 | -------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | [@stack_chan](https://x.com/stack_chan)                                          | [@mongonta555](https://x.com/mongonta555)                                   |
 | Shinya Ishikawa                                                                  | Takao Akaki                                                                 |
+
+Stack-chan (スタックチャン) is a registered trademark of Shinya Ishikawa; this project is independent and only made to work with [Stack-chan](https://github.com/stack-chan/stack-chan) robots.

@@ -3,9 +3,9 @@
 Embody Mode makes the robot a light client of a server you choose: you see through its
 camera, hear through its microphone, speak through its speaker, read every sensor and
 move it, from a browser. The robot can switch between servers and apps: the full
-dashboard ([stackchan-server](https://github.com/mj41/stackchan-server)), a pet for kids
-([stackchan-pet](https://github.com/mj41/stackchan-pet)), or a cockpit that also drives a small car
-([sbot](https://github.com/mj41/sbot)). All of them are part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first,
+dashboard ([s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw)), a pet for kids
+([s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet)), or a cockpit that also drives a small car
+([s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot)). All of them are part of [home-w42-eu](https://github.com/mj41/home-w42-eu), a local first,
 privacy first platform for a home.
 
 There are three ways, from one click to your own firmware:
@@ -54,9 +54,9 @@ things on your own server (B).
 1. **Run a server** on a computer in the same network as the robot:
 
    ```bash
-   git clone https://github.com/mj41/stackchan-server.git
-   cd stackchan-server
-   go run ./cmd/stackchan-server
+   git clone https://github.com/mj41/s-w42-eu-raw.git
+   cd s-w42-eu-raw
+   go run ./cmd/s-w42-eu-raw
    ```
 
    - The first start creates the **robot token** in `~/.config/stackchan-server/robot-token`.
@@ -64,7 +64,7 @@ things on your own server (B).
    - It prints its address, e.g. `http://192.168.1.10:8765`. The robot and your phone must
      reach it: allow TCP port 8765 in the firewall if needed.
    - More options (HTTPS for the browser's microphone, state file, offering other servers):
-     the server's readme, [Run](https://github.com/mj41/stackchan-server#run).
+     the server's readme, [Run](https://github.com/mj41/s-w42-eu-raw#run).
 
 2. **Set the robot up** from the same computer: plug the robot in, open
    `http://localhost:8765/setup` in Chrome or Edge and press **Set up my robot**. The server
@@ -81,7 +81,7 @@ things on your own server (B).
    - Or, on a robot that already has Embody Mode, from a terminal:
      `go run ./cmd/stackchan-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
      then `go run ./cmd/stackchan-usb restart` (the server's readme,
-     [Set a robot up over USB](https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb)).
+     [Set a robot up over USB](https://github.com/mj41/s-w42-eu-raw#set-a-robot-up-over-usb)).
 
 3. Pair: the robot shows a QR code; scan it with your phone ([First start](#first-start)).
 
@@ -97,13 +97,13 @@ release.
 
 ```bash
 git clone -b embody-mj41 https://github.com/mj41/StackChan.git
-git clone https://github.com/mj41/stackchan-server.git   # the server and stackchan-usb
+git clone https://github.com/mj41/s-w42-eu-raw.git   # the server and s-w42-eu-usb
 ```
 
 ### 2. Choose how the robot gets its server
 
 - **Over USB after flashing** (simplest): nothing to configure. Set the robot up afterwards as
-  in B, step 2 (the page with "Keep the robot's firmware", or `stackchan-usb`).
+  in B, step 2 (the page with "Keep the robot's firmware", or `s-w42-eu-usb`).
 - **Built in:** create `StackChan/firmware/sdkconfig.defaults.local` (it is gitignored,
   because it holds the token):
 
@@ -115,7 +115,7 @@ git clone https://github.com/mj41/stackchan-server.git   # the server and stackc
   For chan.w42.eu: `wss://chan.w42.eu` and the token that
   [chan.w42.eu/robots](https://chan.w42.eu/robots) shows once when you add your robot by its
   id (`stackchan-` and the robot's Wi-Fi MAC address in lowercase without colons, e.g.
-  `stackchan-0a1b2c3d4e50`; `stackchan-usb hello` prints it, and the firmware logs it at start).
+  `stackchan-0a1b2c3d4e50`; `s-w42-eu-usb hello` prints it, and the firmware logs it at start).
 
   **The first build turns these into `sdkconfig`, and after that `sdkconfig` wins.** To
   change them later, edit the same lines in `firmware/sdkconfig` too (or delete `sdkconfig`
@@ -172,7 +172,7 @@ Plug the cable into the USB-C port **on the robot's head** (the CoreS3), then:
 ### 5. Set it up over USB
 
 Without a built-in server (step 2), set the robot up as in B, step 2: the setup page with
-**Keep the robot's firmware**, or `stackchan-usb`.
+**Keep the robot's firmware**, or `s-w42-eu-usb`.
 
 ### The official release
 
@@ -222,7 +222,7 @@ The robot keeps a **list of servers** and can switch between them:
   **Connect** switches to it, **Pin** makes the shown one the default at start.
 - **Over USB:** set the robot up again with another server (A or B); it is added to the list
   and made the default.
-- **Offered by a server:** run `stackchan-server` with
+- **Offered by a server:** run `s-w42-eu-raw` with
   `-offer Name=ws://host:port,<token file>` and its robots add that server to their list.
 - **From the dashboard:** the "Servers" section adds, removes and switches servers.
 
@@ -230,9 +230,9 @@ Apps that run as servers the robot can switch to:
 
 | App | What | Repo |
 |---|---|---|
-| Dashboard | everything the robot has: camera, mic, speaker, every sensor, IR, NFC, files | [stackchan-server](https://github.com/mj41/stackchan-server) |
-| Pet | a Tamagotchi for kids, fed with NFC cards, with games and routines | [stackchan-pet](https://github.com/mj41/stackchan-pet) |
-| Cockpit | the robot's camera with a joystick for a TPBot car, head pad and lights, a safety stop | [sbot](https://github.com/mj41/sbot) |
+| Dashboard | everything the robot has: camera, mic, speaker, every sensor, IR, NFC, files | [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw) |
+| Pet | a Tamagotchi for kids, fed with NFC cards, with games and routines | [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet) |
+| Cockpit | the robot's camera with a joystick for a TPBot car, head pad and lights, a safety stop | [s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot) |
 
 ## Optional: drive a TPBot car
 
@@ -248,7 +248,7 @@ enable the car.
 2. **Switch the TPBot on with one press** of its power button (its LEDs breathe green).
    A second press starts its own line-following mode (rainbow LEDs), which drives by
    itself.
-3. **Run [sbot](https://github.com/mj41/sbot#run)** and switch the robot to it ([More servers and apps](#more-servers-and-apps)). In sbot's page, open **More** and
+3. **Run [s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot#run)** and switch the robot to it ([More servers and apps](#more-servers-and-apps)). In sbot's page, open **More** and
    turn the car on. The robot registers again with the car commands and connects to the
    car within seconds.
 4. Drive with the joystick or WASD while watching through the robot's camera. The car
@@ -274,7 +274,7 @@ Embody Mode, so use it only with a server you trust.
 
 | Problem | Try |
 |---|---|
-| The setup page offers no device | a data cable (not a charging-only one), in the head's USB-C port; close other programs on the port (`idf.py monitor`, `stackchan-usb`); on Linux, the `dialout` group |
+| The setup page offers no device | a data cable (not a charging-only one), in the head's USB-C port; close other programs on the port (`idf.py monitor`, `s-w42-eu-usb`); on Linux, the `dialout` group |
 | The setup page: "The robot did not answer" | press the robot's reset button and try again; with "Keep the robot's firmware", the robot needs firmware with setup over USB (embody-v0.1.0 or newer) |
 | Flashing stops halfway | put the robot into flashing mode by hand (hold the reset button until the green LED lights up) and press the button again |
 | The robot stays on "Connecting" | the server URL and token (for built-in ones: in `sdkconfig`, not only in `sdkconfig.defaults.local`), the firewall, the same network |
@@ -294,8 +294,8 @@ Embody Mode, so use it only with a server you trust.
   image. On chan.w42.eu every robot has its own token, which works only for that robot id. On
   your own server without sign-in or `-robot-tokens-file`, robots share the server's one robot
   token. Anyone who reads the robot's flash gets its token. Per-robot keys and owner-signed permissions are designed (the trust
-  design, [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in
-  stackchan-mj) but not built yet.
+  design, [stackchan-trust.md](https://github.com/mj41/home-w42-eu/blob/main/docs/implementations/stackchan-trust.md) in
+  home-w42-eu) but not built yet.
 - **Setup over USB trusts the cable,** with one tap: a new default server needs a **Yes** on
   the robot's screen ("Connect to …?"); Wi-Fi, autostart and servers that are not the default
   need no tap. Having the robot in hand is the proof of ownership, as with its QR code.

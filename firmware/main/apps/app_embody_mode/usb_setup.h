@@ -11,7 +11,7 @@ namespace embody {
 
 /**
  * @brief Setup over the USB cable: a computer (chan.w42.eu/setup in Chrome, or the
- *        stackchan-usb tool) asks for the robot id and writes the server, its token,
+ *        s-w42-eu-usb tool) asks for the robot id and writes the server, its token,
  *        autostart and Wi-Fi into the robot's settings, so nobody builds firmware for a
  *        token. Physical access is the proof of ownership, like the QR code.
  *

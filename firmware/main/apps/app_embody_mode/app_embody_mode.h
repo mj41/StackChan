@@ -39,12 +39,12 @@ class Label;
 }  // namespace smooth_ui_toolkit::lvgl_cpp
 
 /**
- * @brief Embody Mode: remote control through stackchan-server.
+ * @brief Embody Mode: remote control through s-w42-eu-raw.
  *
  * Connects to CONFIG_STACKCHAN_EMBODY_SERVER_URL and shows the server's pairing
  * URL as a QR code. Once a browser pairs, the robot shows its face; a long
  * press brings the QR back, a tap is reported as a "screen_tap" event.
- * Handles the basic command set (see stackchan-server internal/wire), shows
+ * Handles the basic command set (see s-w42-eu-raw internal/wire), shows
  * pictures sent from the phone, streams camera and microphone while someone
  * watches, plays browser audio, streams telemetry and reports robot events
  * (touch, IMU, NFC tags).

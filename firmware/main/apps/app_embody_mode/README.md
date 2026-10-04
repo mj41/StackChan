@@ -2,7 +2,7 @@
 
 To set up a robot, see [SETUP.md](SETUP.md).
 
-Launcher app (first icon) that lets you control this Stackchan from a browser through [stackchan-server](https://github.com/mj41/stackchan-server). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the stackchan-server readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md) in stackchan-mj.
+Launcher app (first icon) that lets you control this Stackchan from a browser through [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw). The protocol is the [device wire protocol](https://github.com/mj41/home-w42-eu/blob/main/docs/wire-protocol.md) of [home-w42-eu](https://github.com/mj41/home-w42-eu); the s-w42-eu-raw readme lists the robot's commands, and the trust design is [design.md](https://github.com/mj41/home-w42-eu/blob/main/docs/implementations/stackchan-trust.md) in stackchan-mj.
 
 > **A proof of concept, vibe coded.** Written with AI agents and tested on real hardware at
 > home, but neither the code nor its security has been reviewed by humans. Use it on your
@@ -40,7 +40,7 @@ QR screen's buttons are described under [Servers](#servers).
 
 ## Servers
 
-The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), servers a server **offers** (`ServerOffer`, sent after `Accepted`; stackchan-server `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
+The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), servers a server **offers** (`ServerOffer`, sent after `Accepted`; s-w42-eu-raw `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
 - **QR screen:** swipe up from the bottom; next to Home, **QR** opens it, and while it is open that button reads **APP** and goes back to the app. The top row is `Pin  name n/m  Next ▶`; the bottom-right button reads **Back to app** on the connected server and **Connect** on another one.
   - **Next** browses the list; the connection stays, and another server's code comes only after Connect.
@@ -52,7 +52,7 @@ The robot keeps a **server list** in NVS (namespace `embody`): the built-in serv
 
 ## Setup over USB
 
-A computer writes servers, their tokens, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `stackchan-usb` from [stackchan-server](https://github.com/mj41/stackchan-server#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
+A computer writes servers, their tokens, autostart and Wi-Fi into the robot's settings over the USB cable ([usb_setup.h](usb_setup.h), started from `main()`, so it also works in the launcher): [chan.w42.eu/setup](https://chan.w42.eu/setup) in Chrome, or `s-w42-eu-usb` from [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw#set-a-robot-up-over-usb). Lines on the USB serial port, each `@stackchan <JSON>`; the rest of the port's output (logs) stays as it was:
 
 - `{"op":"hello"}` → the robot id, model, firmware version, protocol 1, whether automation is built in, and the `original` and `previous` firmware records when it has them.
 - `{"op":"provision","server":{"name","url","token"},"default":true,"servers":[{"name","url","token"}],"pin":"<url>","autostart":true,"wifi":{"ssid","password"},"original":{},"previous":{}}` → `{"ok":true,"applied":[…]}`. Every part is optional.
@@ -63,7 +63,7 @@ A computer writes servers, their tokens, autostart and Wi-Fi into the robot's se
   - With these two records, the setup page restores the original or the previous backup, after checking the file's SHA-256. Older backups go back with `esptool.py write_flash 0x0 <file>`.
 - `{"op":"pair"}` → `{"ok":true,"url"}`: the pairing link Embody Mode shows now (an error while it has none). The setup page opens it, so the computer that set the robot up is paired at once.
 - `{"op":"restart"}` → a restart, into Embody Mode when automation is built in.
-- **With automation built in**, a program on the computer can do what a person at the robot does (`stackchan-usb screenshot`, `tap`, `launch`):
+- **With automation built in**, a program on the computer can do what a person at the robot does (`s-w42-eu-usb screenshot`, `tap`, `launch`):
   - `{"op":"screenshot"}` → `{"ok":true,"width","height","jpeg":"<base64>","question":bool}`: the active screen as a JPEG (the robot's own questions are on the top layer and not in it; `question` says one is open).
   - `{"op":"tap","x","y","ms"?}`: a touch through a virtual pointer (100 ms, or longer for a long press). The first tap asks on the screen **"Let the computer on USB use the screen?"**; the Yes is kept in NVS (`embody/usb_ctrl`) until no USB host is there for a few seconds (the cable is unplugged). Taps are refused while one of the robot's own questions is open, and a press in progress is released when one opens: **only the person at the robot answers them.**
   - `{"op":"launch","app"}`: restart into a launcher app once (`"launcher"`: none); an unknown name answers with the list of apps.
@@ -131,6 +131,6 @@ After adding sources or Kconfig options, run `idf.py reconfigure` before `idf.py
 ## Notes
 
 - **Launcher order:** this app is launcher index 0 and AI.AGENT is 1. Other apps return via hardcoded `requestWarmReboot(<index>)` values, which are +1 compared with upstream.
-- **No firmware from a server:** xiaozhi's OTA check is off (`CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK`); see the trust design, [design.md](https://github.com/mj41/stackchan-mj/blob/main/docs/design.md).
+- **No firmware from a server:** xiaozhi's OTA check is off (`CONFIG_STACKCHAN_XIAOZHI_OTA_CHECK`); see the trust design, [design.md](https://github.com/mj41/home-w42-eu/blob/main/docs/implementations/stackchan-trust.md).
 - **Send limit:** xiaozhi's `WebSocket::Send` rejects messages over 65,535 bytes. That limits camera frames, not pictures, which the robot only receives.
 - **Wi-Fi power save:** off while in use (2 minutes after the last command, or while the camera or microphone streams), on otherwise. The first command after a quiet spell can wait up to about 100 ms for the next beacon.

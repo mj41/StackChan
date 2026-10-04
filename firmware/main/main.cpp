@@ -25,7 +25,7 @@ extern "C" void app_main(void)
     // HAL init
     GetHAL().init();
 
-    // Setup over the USB cable (chan.w42.eu/setup, stackchan-usb): server, token, Wi-Fi.
+    // Setup over the USB cable (chan.w42.eu/setup, s-w42-eu-usb): server, token, Wi-Fi.
     embody::note_boot();  // before the launcher reads the boot app
     embody::startUsbSetup();
 

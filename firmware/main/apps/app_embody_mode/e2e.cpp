@@ -452,7 +452,7 @@ void E2E::forgetAll()
 
 /* -------------------------------- self-test ------------------------------- */
 
-// The reference test vectors (stackchan-server e2e/testdata/vectors.json).
+// The reference test vectors (s-w42-eu-raw e2e/testdata/vectors.json).
 bool E2E::selfTest()
 {
     int bad      = 0;

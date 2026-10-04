@@ -2,7 +2,7 @@ name: Embody Mode firmware
 
 # The published firmware: built from sdkconfig.defaults + sdkconfig.defaults.release (no
 # server or token inside; a robot is set up over USB at chan.w42.eu/setup or with
-# stackchan-usb). A tag embody-v* makes a release with the parts, a manifest for browser
+# s-w42-eu-usb). A tag embody-v* makes a release with the parts, a manifest for browser
 # flashing, and one merged image for esptool.
 on:
   push:
@@ -47,4 +47,4 @@ jobs:
           body: |
             Embody Mode firmware for M5Stack Stackchan (CoreS3), with no server or token inside.
             Set a robot up in Chrome at https://chan.w42.eu/setup (USB), or flash
-            stackchan-embody.bin at 0x0 with esptool and set it up with stackchan-usb.
+            stackchan-embody.bin at 0x0 with esptool and set it up with s-w42-eu-usb.

@@ -107,7 +107,7 @@ The system has four major client types:
 
 ```bash
 git clone <your-repo-url>
-cd stackchan-server
+cd s-w42-eu-raw
 ```
 
 ### 4.2 Create the Database
@@ -1074,7 +1074,7 @@ Typical flow:
 ```bash
 go build -o stackChan .
 cp manifest/config/config.yaml ./config.yaml
-docker build -f manifest/docker/Dockerfile -t stackchan-server:local .
+docker build -f manifest/docker/Dockerfile -t s-w42-eu-raw:local .
 ```
 
 ### 14.3 Kubernetes

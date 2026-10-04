@@ -22,8 +22,8 @@ namespace embody {
 class E2E;
 
 /**
- * @brief WebSocket client for an Embody Mode server, e.g. stackchan-server
- *        (https://github.com/mj41/stackchan-server).
+ * @brief WebSocket client for an Embody Mode server, e.g. s-w42-eu-raw
+ *        (https://github.com/mj41/s-w42-eu-raw).
  *
  * Frames are JSON {kind, meta, body}; see the protocol table in the server's
  * readme.md. Driven from the app loop: update() may block while connecting.
