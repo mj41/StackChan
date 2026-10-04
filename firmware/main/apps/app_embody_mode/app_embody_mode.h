@@ -297,9 +297,14 @@ private:
     // otherwise the firmware releases it at rest and the head can be turned by hand.
     uint32_t _hold_until = 0;  // ms; 0 = not holding
 
-    // Continuous yaw rotation ("rotate"), time-limited and only with "no_head_cable": a cable
-    // in the head's USB-C would wind up (which port is used cannot be detected).
+    // Continuous yaw rotation ("rotate"), time-limited and only after the person at the robot
+    // tapped Yes on its screen: a cable in the head's USB-C would wind up (which port is used
+    // cannot be detected). The Yes holds until a cable is plugged in or out, or the app closes.
     uint32_t _rotate_until = 0;  // ms; 0 = not rotating
+    bool _rotate_confirmed = false;
+    std::shared_ptr<std::atomic<int>> _rotate_answer;  // the open question: 0 waiting, 1 Yes, -1 No or no answer
+    int _rotate_ask_velocity = 0;                       // the rotation asked for, started after Yes
+    int _rotate_ask_seconds  = 0;
     bool _servo_power      = true;
 
     // Touch: touch_down/touch_up events per finger; raw frames (binary 0x06) while streaming.
@@ -343,7 +348,10 @@ private:
     int find_server(const std::string& key);
     static void on_server_nav(lv_event_t* e);
     void send_imu_stream();
-    void start_rotate(int velocity, int seconds, bool noHeadCable, bool usbPowerOk);
+    void request_rotate(int velocity, int seconds);
+    void update_rotate_question();
+    void forget_rotate_confirmation(const char* reason);
+    void start_rotate(int velocity, int seconds);
     void check_rotate_safety();
     void stop_rotate();
     void update_touch();

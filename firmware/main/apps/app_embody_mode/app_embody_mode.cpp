@@ -20,6 +20,7 @@
 #include <mooncake.h>
 #include "automation.h"
 #include "usb_setup.h"
+#include "confirm_dialog.h"
 #include <audio_codec.h>
 #include <lvgl_image.h>
 #include <jpg/image_to_jpeg.h>
@@ -416,6 +417,7 @@ void AppEmbodyMode::onRunning()
     if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
         stop_rotate();
     }
+    update_rotate_question();
     check_rotate_safety();
     update_touch();
     render();
@@ -440,6 +442,7 @@ void AppEmbodyMode::onClose()
     stop_speaker();
     stop_nfc();
     stop_rotate();
+    forget_rotate_confirmation("app closed");
     stop_hold();
     if (_car) {
         _car->stop();  // stops the motors first
@@ -1148,11 +1151,10 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         GetHAL().setServoPowerEnabled(_servo_power);
         queue_event(_servo_power ? "servo_power_on" : "servo_power_off");
     } else if (command == "rotate") {
-        // {"velocity": -1000..1000, "seconds": 1..30, "no_head_cable": true, "usb_power_ok": true};
-        // velocity 0 stops
+        // {"velocity": -1000..1000, "seconds": 1..30}; velocity 0 stops. The first one after a
+        // start or a cable change asks on the robot's screen.
         const int velocity = args["velocity"] | 0;
-        velocity ? start_rotate(velocity, args["seconds"] | 5, args["no_head_cable"] | false, args["usb_power_ok"] | false)
-                 : stop_rotate();
+        velocity ? request_rotate(velocity, args["seconds"] | 5) : stop_rotate();
     } else if (command == "assets") {
         send_asset_list();
     } else if (command == "screen_snapshot") {
@@ -1870,19 +1872,62 @@ void AppEmbodyMode::set_light_stream(bool on)
 
 /* -------------------------------- Rotation -------------------------------- */
 
-void AppEmbodyMode::start_rotate(int velocity, int seconds, bool noHeadCable, bool usbPowerOk)
+// Only the person at the robot can see whether a cable is in the head's USB-C: the first rotation
+// asks on its screen, and the Yes holds until a cable is plugged in or out or the app closes.
+void AppEmbodyMode::request_rotate(int velocity, int seconds)
 {
-    if (!noHeadCable) {
-        queue_event("rotate_refused", {}, {{"reason", "confirm that no cable is in the head's USB-C (no_head_cable)"}});
+    if (_rotate_confirmed) {
+        start_rotate(velocity, seconds);
         return;
     }
-    // USB power in: the robot cannot tell the head's USB-C from the stand's, so a second, explicit
-    // confirmation that the cable is in the stand.
+    _rotate_ask_velocity = velocity;  // a repeated request while asking only updates what is asked
+    _rotate_ask_seconds  = seconds;
+    if (_rotate_answer) {
+        return;
+    }
     hal_bridge::PmicStatus pmic;
-    if (!usbPowerOk && hal_bridge::board_get_pmic_status(pmic) && pmic.vbus_mv > 1000) {
-        queue_event("rotate_refused", {}, {{"reason", "USB power is in: confirm the cable is in the stand, not the head (usb_power_ok)"}});
+    const bool usb_in = hal_bridge::board_get_pmic_status(pmic) && pmic.vbus_mv > 1000;
+    _rotate_answer    = std::make_shared<std::atomic<int>>(0);
+    embody::askOnScreen("Turn the head round?",
+                        std::string(usb_in ? "USB power is in: is the cable in the stand, not in the head?\n"
+                                           : "Is there no cable in the head's USB-C?\n") +
+                            "A cable there would wind up. Yes holds until a cable is plugged in or out.",
+                        30, [answer = _rotate_answer](bool yes) { *answer = yes ? 1 : -1; });
+    queue_event("rotate_asking");
+    mclog::tagInfo(_tag, "rotate: asking on the screen");
+}
+
+void AppEmbodyMode::update_rotate_question()
+{
+    if (!_rotate_answer || *_rotate_answer == 0) {
         return;
     }
+    const bool yes = *_rotate_answer == 1;
+    _rotate_answer.reset();
+    if (!yes) {
+        queue_event("rotate_refused", {}, {{"reason", "not confirmed on the robot"}});
+        mclog::tagInfo(_tag, "rotate: not confirmed on the robot");
+        return;
+    }
+    _rotate_confirmed = true;
+    queue_event("rotate_confirmed");
+    start_rotate(_rotate_ask_velocity, _rotate_ask_seconds);
+}
+
+void AppEmbodyMode::forget_rotate_confirmation(const char* reason)
+{
+    if (_rotate_answer) {  // a cable changed while asking: that answer no longer counts
+        _rotate_answer.reset();
+        queue_event("rotate_refused", {}, {{"reason", std::string(reason) + " while asking: ask again"}});
+    }
+    if (_rotate_confirmed) {
+        _rotate_confirmed = false;
+        mclog::tagInfo(_tag, "rotate: confirmation reset ({})", reason);
+    }
+}
+
+void AppEmbodyMode::start_rotate(int velocity, int seconds)
+{
     if (!_servo_power) {
         queue_event("rotate_refused", {}, {{"reason", "servo power is off"}});
         return;
@@ -2068,9 +2113,11 @@ void AppEmbodyMode::update_power_events()
             stop_rotate();
             queue_event("rotate_stopped", {}, {{"reason", "usb plugged in"}});
         }
+        forget_rotate_confirmation("usb plugged in");
     }
     if (ev & 0x40) {
         queue_event("usb_unplugged");
+        forget_rotate_confirmation("usb unplugged");
     }
     if (ev & 0x20) {
         queue_event("battery_inserted");

@@ -5,6 +5,7 @@
  */
 #include "usb_setup.h"
 #include "automation.h"
+#include "confirm_dialog.h"
 #include <hal/hal.h>
 #include <lvgl.h>
 #include <settings.h>
@@ -19,7 +20,6 @@
 #include <algorithm>
 #include <cctype>
 #include <cstring>
-#include <atomic>
 #include <mutex>
 #include <string>
 
@@ -33,74 +33,6 @@ void embody::setPairUrl(const std::string& url)
 {
     std::lock_guard<std::mutex> lock(s_pair_mutex);
     s_pair_url = url;
-}
-
-// A question on the robot's screen, above any app (LVGL's top layer): true when the person at
-// the robot taps Yes within the time. The LVGL lock is held only to build and remove the dialog.
-static std::atomic<int> s_answer{0};
-
-static void on_answer(lv_event_t* e)
-{
-    s_answer = (int)(intptr_t)lv_event_get_user_data(e);
-}
-
-static bool confirm_on_screen(const std::string& question, const std::string& detail, int seconds)
-{
-    s_answer = 0;
-    lv_obj_t* box = nullptr;
-    {
-        LvglLockGuard lock;
-        box = lv_obj_create(lv_layer_top());
-        lv_obj_set_size(box, LV_PCT(100), LV_PCT(100));
-        lv_obj_set_style_bg_color(box, lv_color_hex(0x1E2355), 0);
-        lv_obj_set_style_bg_opa(box, LV_OPA_COVER, 0);
-        lv_obj_set_style_border_width(box, 0, 0);
-        lv_obj_set_style_radius(box, 0, 0);
-        lv_obj_add_flag(box, LV_OBJ_FLAG_CLICKABLE);  // nothing below reacts meanwhile
-        lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
-
-        lv_obj_t* q = lv_label_create(box);
-        lv_label_set_text(q, question.c_str());
-        lv_label_set_long_mode(q, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(q, LV_PCT(100));
-        lv_obj_set_style_text_font(q, &lv_font_montserrat_20, 0);
-        lv_obj_set_style_text_color(q, lv_color_white(), 0);
-        lv_obj_align(q, LV_ALIGN_TOP_LEFT, 0, 4);
-
-        lv_obj_t* d = lv_label_create(box);
-        lv_label_set_text(d, detail.c_str());
-        lv_label_set_long_mode(d, LV_LABEL_LONG_WRAP);
-        lv_obj_set_width(d, LV_PCT(100));
-        lv_obj_set_style_text_font(d, &lv_font_montserrat_16, 0);
-        lv_obj_set_style_text_color(d, lv_color_hex(0xA3A8CC), 0);
-        lv_obj_align_to(d, q, LV_ALIGN_OUT_BOTTOM_LEFT, 0, 10);
-
-        struct {
-            const char* text;
-            uint32_t color;
-            int answer;
-            lv_align_t align;
-        } buttons[] = {{"Yes", 0x2E9E5B, 1, LV_ALIGN_BOTTOM_LEFT}, {"No", 0xC0392B, -1, LV_ALIGN_BOTTOM_RIGHT}};
-        for (const auto& bt : buttons) {
-            lv_obj_t* b = lv_button_create(box);
-            lv_obj_set_size(b, 130, 60);
-            lv_obj_set_style_bg_color(b, lv_color_hex(bt.color), 0);
-            lv_obj_align(b, bt.align, 0, 0);
-            lv_obj_add_event_cb(b, on_answer, LV_EVENT_CLICKED, (void*)(intptr_t)bt.answer);
-            lv_obj_t* l = lv_label_create(b);
-            lv_label_set_text(l, bt.text);
-            lv_obj_set_style_text_font(l, &lv_font_montserrat_24, 0);
-            lv_obj_center(l);
-        }
-    }
-    for (int i = 0; i < seconds * 10 && s_answer == 0; i++) {
-        vTaskDelay(pdMS_TO_TICKS(100));
-    }
-    {
-        LvglLockGuard lock;
-        lv_obj_delete(box);
-    }
-    return s_answer == 1;
 }
 
 static std::string host_of(const std::string& url)
@@ -217,7 +149,7 @@ static void handle(const std::string& json)
             if (current.GetString("default", "") != new_default) {
                 const std::string host = host_of(new_default);
                 mclog::tagInfo(_tag, "asking on the screen: connect to {}?", host);
-                if (!confirm_on_screen("Connect to " + (new_name.empty() ? host : new_name) + "?",
+                if (!embody::askOnScreenAndWait("Connect to " + (new_name.empty() ? host : new_name) + "?",
                                        host + "\nasked over USB. Tap Yes to make it this robot's server.", 60)) {
                     mclog::tagInfo(_tag, "not confirmed on the robot: nothing changed");
                     return reply_error("not confirmed on the robot: nothing changed");
