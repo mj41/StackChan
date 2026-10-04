@@ -150,6 +150,9 @@ private:
     embody::E2E _e2e;
     bool _e2e_ok = false;
     bool _boot_stable = false;  // ran a minute: the boot-loop guard counts from zero again
+    bool _wifi_low_latency = false;  // Wi-Fi power save off while someone uses the robot
+    uint32_t _ps_seen_commands = 0;  // the client's command count when power save last looked
+    uint32_t _last_command_ms = 0;   // when a command last arrived (any, ping too)
     std::string _published_pair;  // the pairing link given to the USB setup ({"op":"pair"})
     std::vector<std::string> _e2e_urls;
     void load_e2e_urls();

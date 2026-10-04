@@ -26,6 +26,7 @@
 #include <ArduinoJson.hpp>
 #include <driver/usb_serial_jtag.h>
 #include <esp_app_desc.h>
+#include <esp_wifi.h>
 #include <esp_system.h>
 #include <esp_timer.h>
 #include <esp_log.h>
@@ -391,6 +392,20 @@ void AppEmbodyMode::onRunning()
         _published_pair = pair;
         embody::setPairUrl(pair);
     }
+    // Wi-Fi modem sleep makes every packet to the robot wait for the next beacon (up to about
+    // 100 ms): off for 2 minutes after the last command and while the camera or microphone
+    // streams, on otherwise (it saves battery). The first command after a quiet spell is slow.
+    if (_client && _client->commandCount() != _ps_seen_commands) {
+        _ps_seen_commands   = _client->commandCount();
+        _last_command_ms = GetHAL().millis();
+    }
+    if (const bool want = _client && (_camera_on || _mic_running ||
+                                      (_ps_seen_commands > 0 && GetHAL().millis() - _last_command_ms < 120000));
+        want != _wifi_low_latency) {
+        _wifi_low_latency = want;
+        const esp_err_t err = esp_wifi_set_ps(want ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM);
+        mclog::tagInfo(_tag, "wifi power save {}: {}", want ? "off (in use)" : "on (idle)", esp_err_to_name(err));
+    }
     if (!_boot_stable && GetHAL().millis() > 60000) {
         _boot_stable = true;
         embody::mark_stable();
@@ -414,6 +429,10 @@ void AppEmbodyMode::onClose()
 {
     mclog::tagInfo(_tag, "on close");
     embody::setPairUrl("");
+    if (_wifi_low_latency) {
+        esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
+        _wifi_low_latency = false;
+    }
 
     stop_mic();
     stop_sound(false);
