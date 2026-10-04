@@ -24,4 +24,10 @@ void askOnScreen(const std::string& question, const std::string& detail, int sec
  */
 bool askOnScreenAndWait(const std::string& question, const std::string& detail, int seconds);
 
+/**
+ * @brief Whether one of these questions is on the screen now. Taps injected over USB (automation)
+ *        are refused then: only the person at the robot may answer.
+ */
+bool questionOpen();
+
 }  // namespace embody

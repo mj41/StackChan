@@ -13,12 +13,17 @@
 #include <mooncake_log.h>
 #include <ArduinoJson.hpp>
 #include <driver/usb_serial_jtag.h>
+#include <jpg/image_to_jpeg.h>
+#include <mbedtls/base64.h>
+#include <mooncake.h>
 #include <esp_app_desc.h>
 #include <esp_system.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <strings.h>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -47,7 +52,17 @@ static void reply(const ArduinoJson::JsonDocument& doc)
     std::string json;
     ArduinoJson::serializeJson(doc, json);  // replaces the string's content: not appendable
     const std::string line = _prefix + json + "\n";
-    usb_serial_jtag_write_bytes(line.data(), line.size(), pdMS_TO_TICKS(500));
+    size_t sent = 0;  // a screenshot is ~30 KB: write until it is all out (or the host stops reading)
+    for (int idle = 0; sent < line.size() && idle < 10;) {
+        // at most 512 bytes at a time: a write larger than the 1 KB TX buffer never fits
+        const int n = usb_serial_jtag_write_bytes(line.data() + sent, std::min<size_t>(512, line.size() - sent),
+                                                  pdMS_TO_TICKS(200));
+        idle = n > 0 ? 0 : idle + 1;
+        sent += n > 0 ? n : 0;
+    }
+    if (sent < line.size()) {
+        mclog::tagWarn(_tag, "reply cut: {} of {} bytes sent", sent, line.size());
+    }
 }
 
 static void reply_error(const char* error)
@@ -91,6 +106,99 @@ static bool save_server(const std::string& name, const std::string& url, const s
     }
     return true;
 }
+
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+// Automation over USB: what a person at the robot can do, for a program on the computer it is
+// plugged into (start an app, tap the screen, see it). Never an answer to the robot's own
+// questions (embody::questionOpen): those are for the person at the robot only.
+
+// A tap as a virtual pointer: pressed at (x, y) until s_tap_until (LVGL ticks, ms).
+static std::atomic<int> s_tap_x{0}, s_tap_y{0};
+static std::atomic<uint32_t> s_tap_until{0};
+static lv_indev_t* s_usb_pointer = nullptr;
+
+static void usb_pointer_read(lv_indev_t*, lv_indev_data_t* data)
+{
+    data->point.x = s_tap_x;
+    data->point.y = s_tap_y;
+    const bool pressed = (int32_t)(s_tap_until.load() - lv_tick_get()) > 0 && !embody::questionOpen();
+    data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
+}
+
+// Taps need the person's Yes once ("Let the computer on USB use the screen?"): with taps a program
+// could choose and pin any server in the list. The Yes is kept in NVS (a launch restarts the
+// robot) and ends when the USB host goes away (the cable is unplugged).
+static bool usb_control_allowed()
+{
+    Settings settings("embody", false);
+    return settings.GetBool("usb_ctrl", false);
+}
+
+static void set_usb_control(bool on)
+{
+    Settings settings("embody", true);
+    settings.SetBool("usb_ctrl", on);
+    mclog::tagInfo(_tag, "control over USB {}", on ? "allowed (until the cable is unplugged)" : "ended");
+}
+
+static void tap(ArduinoJson::JsonDocument& res, int x, int y, int ms)
+{
+    {
+        LvglLockGuard lock;
+        if (!s_usb_pointer) {
+            s_usb_pointer = lv_indev_create();
+            lv_indev_set_type(s_usb_pointer, LV_INDEV_TYPE_POINTER);
+            lv_indev_set_read_cb(s_usb_pointer, usb_pointer_read);
+            lv_indev_set_display(s_usb_pointer, lv_display_get_default());
+        }
+        s_tap_x     = x;
+        s_tap_y     = y;
+        s_tap_until = lv_tick_get() + (uint32_t)ms;
+    }
+    vTaskDelay(pdMS_TO_TICKS(ms + 100));  // released again when the reply goes out
+    res["ok"] = true;
+}
+
+// The active screen as a JPEG, base64 (questions on the top layer are not in it: "question").
+static bool screenshot(ArduinoJson::JsonDocument& res)
+{
+    lv_draw_buf_t* snap = nullptr;
+    {
+        LvglLockGuard lock;
+        snap = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
+    }
+    if (!snap) {
+        mclog::tagWarn(_tag, "screenshot: no snapshot");
+        return false;
+    }
+    mclog::tagInfo(_tag, "screenshot: {}x{}, encoding", (int)snap->header.w, (int)snap->header.h);
+    uint8_t* jpeg = nullptr;
+    size_t len    = 0;
+    const bool ok = image_to_jpeg((uint8_t*)snap->data, snap->data_size, snap->header.w, snap->header.h,
+                                  V4L2_PIX_FMT_RGB565, 70, &jpeg, &len) &&
+                    jpeg;
+    res["width"]  = snap->header.w;
+    res["height"] = snap->header.h;
+    {
+        LvglLockGuard lock;
+        lv_draw_buf_destroy(snap);
+    }
+    if (!ok) {
+        return false;
+    }
+    size_t b64len = 0;
+    mbedtls_base64_encode(nullptr, 0, &b64len, jpeg, len);
+    std::string b64(b64len, '\0');
+    mbedtls_base64_encode((unsigned char*)b64.data(), b64.size(), &b64len, jpeg, len);
+    free(jpeg);
+    b64.resize(b64len);
+    res["ok"]       = true;
+    res["question"] = embody::questionOpen();
+    res["jpeg"]     = b64;
+    mclog::tagInfo(_tag, "screenshot: {} bytes JPEG", len);
+    return true;
+}
+#endif
 
 static void handle(const std::string& json)
 {
@@ -233,6 +341,68 @@ static void handle(const std::string& json)
         res["url"] = url;
         return reply(res);
     }
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+    if (op == "tap") {
+        // {"x": 0..319, "y": 0..239, "ms": 30..5000 (default 100; long press ~800)}
+        const int x  = req["x"] | -1;
+        const int y  = req["y"] | -1;
+        const int ms = std::clamp(req["ms"] | 100, 30, 5000);
+        if (x < 0 || y < 0 || x >= (int)lv_display_get_horizontal_resolution(nullptr) ||
+            y >= (int)lv_display_get_vertical_resolution(nullptr)) {
+            return reply_error("x or y outside the screen");
+        }
+        if (embody::questionOpen()) {
+            return reply_error("a question is on the robot's screen: only a person at the robot may answer it");
+        }
+        if (!usb_control_allowed()) {
+            mclog::tagInfo(_tag, "asking on the screen: allow control over USB?");
+            if (!embody::askOnScreenAndWait("Let the computer on USB use the screen?",
+                                            "It can then tap anything until the cable is unplugged, but never answer "
+                                            "questions like this one.",
+                                            60)) {
+                return reply_error("not allowed on the robot: tap Yes when it asks");
+            }
+            set_usb_control(true);
+        }
+        tap(res, x, y, ms);
+        mclog::tagInfo(_tag, "tap over USB at {},{} for {} ms", x, y, ms);
+        return reply(res);
+    }
+    if (op == "screenshot") {
+        mclog::tagInfo(_tag, "screenshot over USB");
+        if (!screenshot(res)) {
+            return reply_error("screenshot failed");
+        }
+        return reply(res);
+    }
+    if (op == "launch") {
+        // {"app": a launcher app's name ("AVATAR", "Embody Mode"…) or "launcher"}: restart into it
+        const std::string want = req["app"] | "";
+        std::string app        = embody::kLauncherName;
+        if (!want.empty() && strcasecmp(want.c_str(), embody::kLauncherName) != 0) {
+            const auto apps = mooncake::GetMooncake().getAllAppProps();
+            const auto it   = std::find_if(apps.begin(), apps.end(),
+                                           [&](const auto& p) { return strcasecmp(p.info.name.c_str(), want.c_str()) == 0; });
+            if (it == apps.end()) {
+                res["ok"]    = false;
+                res["error"] = "no app named " + want;
+                auto names   = res["apps"].to<ArduinoJson::JsonArray>();
+                for (const auto& p : apps) {
+                    names.add(p.info.name);
+                }
+                return reply(res);
+            }
+            app = it->info.name;
+        }
+        res["ok"]  = true;
+        res["app"] = app;
+        reply(res);
+        mclog::tagInfo(_tag, "launch over USB: restarting into {}", app);
+        embody::set_launch_once(app);
+        vTaskDelay(pdMS_TO_TICKS(300));
+        esp_restart();
+    }
+#endif
     if (op == "restart") {
         res["ok"] = true;
         reply(res);
@@ -249,7 +419,24 @@ static void setup_task(void*)
 {
     std::string line;
     uint8_t buf[128];
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+    // The Yes for control over USB ends when no USB host is there: at start (after a grace time
+    // for the host to enumerate) and whenever the host goes away for a few seconds.
+    const TickType_t started = xTaskGetTickCount();
+    TickType_t gone_since    = 0;
+#endif
     for (;;) {
+#if CONFIG_STACKCHAN_EMBODY_AUTOMATION
+        if (usb_serial_jtag_is_connected()) {
+            gone_since = 0;
+        } else if (xTaskGetTickCount() - started > pdMS_TO_TICKS(5000)) {
+            if (!gone_since) {
+                gone_since = xTaskGetTickCount();
+            } else if (xTaskGetTickCount() - gone_since > pdMS_TO_TICKS(3000) && usb_control_allowed()) {
+                set_usb_control(false);
+            }
+        }
+#endif
         int n = usb_serial_jtag_read_bytes(buf, sizeof buf, pdMS_TO_TICKS(1000));
         for (int i = 0; i < n; i++) {
             const char c = (char)buf[i];

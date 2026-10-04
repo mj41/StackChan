@@ -80,6 +80,11 @@ private:
     std::vector<std::string> _commands;
     bool _servers_announced = false;
     int _pending_switch     = -1;                // from server_switch, done at the top of the loop
+    // A server's server_switch or server_default (another server, a new default) is confirmed on
+    // the robot's screen first, as a new default over USB: only the person at the robot moves it.
+    std::shared_ptr<std::atomic<int>> _server_answer;  // 0 waiting, 1 Yes, -1 No or no answer
+    std::string _server_ask_url;
+    bool _server_ask_default = false;  // true: make it the default; false: switch to it
     std::atomic<int> _nav_request{0};            // from the QR screen: +1 next, 2 pin, 3 connect/close
     lv_obj_t* _server_buttons[3] = {};           // pin, next, back to app / connect
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
@@ -353,6 +358,8 @@ private:
     int find_server(const std::string& key);
     static void on_server_nav(lv_event_t* e);
     void send_imu_stream();
+    void request_server_change(int index, bool makeDefault);
+    void update_server_question();
     void request_rotate(int velocity, int seconds);
     void update_rotate_question();
     void forget_rotate_confirmation(const char* reason);

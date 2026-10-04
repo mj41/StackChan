@@ -47,7 +47,8 @@ The robot keeps a **server list** in NVS (namespace `embody`): the built-in serv
   - **Connect** switches to the shown server: the robot reconnects and shows that server's QR; the QR screen stays open.
   - **Pin** makes the shown one the **default** used at start (blue); tapping Pin on the default **unpins** it.
   - With no default, Embody Mode starts as a **chooser**: it contacts nothing until Connect.
-- **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one).
+- **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one). A switch to another server or a new default is **asked on the robot's screen first** ("Connect to …?" / "Start with …?", 60 s; events `server_asking`, then `server_refused` without a Yes); clearing the default and the QR screen's own buttons need no question.
+- **On the QR screen,** the card shows the shown server's address, whether it is on the local network or the internet, and whether the connection is encrypted (TLS).
 
 ## Setup over USB
 
@@ -62,6 +63,10 @@ A computer writes servers, their tokens, autostart and Wi-Fi into the robot's se
   - With these two records, the setup page restores the original or the previous backup, after checking the file's SHA-256. Older backups go back with `esptool.py write_flash 0x0 <file>`.
 - `{"op":"pair"}` → `{"ok":true,"url"}`: the pairing link Embody Mode shows now (an error while it has none). The setup page opens it, so the computer that set the robot up is paired at once.
 - `{"op":"restart"}` → a restart, into Embody Mode when automation is built in.
+- **With automation built in**, a program on the computer can do what a person at the robot does (`stackchan-usb screenshot`, `tap`, `launch`):
+  - `{"op":"screenshot"}` → `{"ok":true,"width","height","jpeg":"<base64>","question":bool}`: the active screen as a JPEG (the robot's own questions are on the top layer and not in it; `question` says one is open).
+  - `{"op":"tap","x","y","ms"?}`: a touch through a virtual pointer (100 ms, or longer for a long press). The first tap asks on the screen **"Let the computer on USB use the screen?"**; the Yes is kept in NVS (`embody/usb_ctrl`) until no USB host is there for a few seconds (the cable is unplugged). Taps are refused while one of the robot's own questions is open, and a press in progress is released when one opens: **only the person at the robot answers them.**
+  - `{"op":"launch","app"}`: restart into a launcher app once (`"launcher"`: none); an unknown name answers with the list of apps.
 
 So nobody needs to build firmware for a token: the **official release** (built by CI on `embody-v*` tags with `sdkconfig.defaults.release`; `./container.sh release` runs the same build locally) has no server and no token inside, and Embody Mode shows "Set up: chan.w42.eu/setup" until it is set up. Having the robot on the cable is the proof of ownership, like scanning its QR code.
 

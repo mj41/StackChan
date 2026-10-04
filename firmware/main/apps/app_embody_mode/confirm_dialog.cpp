@@ -13,6 +13,8 @@
 
 namespace {
 
+std::atomic<int> s_open{0};  // questions on the screen
+
 struct Dialog;
 
 struct Button {
@@ -35,6 +37,7 @@ void finish(Dialog* d, bool answer)
         return;
     }
     d->finished = true;
+    s_open--;
     if (d->timer) {
         lv_timer_delete(d->timer);
         d->timer = nullptr;
@@ -69,6 +72,7 @@ void on_delete(lv_event_t* e)
 void embody::askOnScreen(const std::string& question, const std::string& detail, int seconds, std::function<void(bool)> done)
 {
     auto* d   = new Dialog;
+    s_open++;
     d->done   = std::move(done);
     d->yes.dialog = d;
     d->no.dialog  = d;
@@ -132,4 +136,9 @@ bool embody::askOnScreenAndWait(const std::string& question, const std::string& 
         vTaskDelay(pdMS_TO_TICKS(100));
     }
     return *answer == 1;
+}
+
+bool embody::questionOpen()
+{
+    return s_open > 0;
 }

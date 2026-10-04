@@ -54,6 +54,24 @@ static std::string host_of(const std::string& url)
     return url.substr(start, url.find_first_of(":/", start) - start);
 }
 
+// What a server is, for the QR screen's card while browsing: its address, whether it is on the
+// local network (private IPv4 ranges, .local, localhost) or the internet, and whether the
+// connection is encrypted (wss: TLS).
+static std::string server_details(const std::string& url)
+{
+    auto start = url.find("://");
+    start      = start == std::string::npos ? 0 : start + 3;
+    const std::string hostport = url.substr(start, url.find('/', start) - start);  // with the port
+    const std::string host     = host_of(url);
+    unsigned a = 0, b = 0, c = 0, d = 0;
+    bool local = host == "localhost" || (host.size() > 6 && host.compare(host.size() - 6, 6, ".local") == 0);
+    if (std::sscanf(host.c_str(), "%u.%u.%u.%u", &a, &b, &c, &d) == 4) {
+        local = a == 10 || a == 127 || (a == 172 && b >= 16 && b <= 31) || (a == 192 && b == 168) || (a == 169 && b == 254);
+    }
+    return hostport + "\n" + (local ? "Local network" : "Internet") + "\n" +
+           (url.rfind("wss://", 0) == 0 ? "Encrypted (TLS)" : "Not encrypted");
+}
+
 // Launcher index of this app (see requestWarmReboot in the other apps).
 static constexpr int _launcher_index = 0;
 
@@ -419,6 +437,7 @@ void AppEmbodyMode::onRunning()
         stop_rotate();
     }
     update_rotate_question();
+    update_server_question();
     check_rotate_safety();
     update_touch();
     render();
@@ -703,6 +722,9 @@ void AppEmbodyMode::create_view()
     _qr_hint->setText("No code yet");
     _qr_hint->setTextFont(&lv_font_montserrat_16);
     _qr_hint->setTextColor(lv_color_hex(_color_muted));
+    _qr_hint->setWidth(144);
+    _qr_hint->setLongMode(LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_style_text_align(_qr_hint->get(), LV_TEXT_ALIGN_CENTER, 0);
     _qr_hint->align(LV_ALIGN_CENTER, 0, 0);
 
     // Right: status, pairing code, details
@@ -724,7 +746,8 @@ void AppEmbodyMode::create_view()
     _detail->setTextFont(&lv_font_montserrat_16);
     _detail->setTextColor(lv_color_hex(_color_muted));
     _detail->setWidth(128);
-    _detail->setLongMode(LV_LABEL_LONG_MODE_WRAP);
+    _detail->setLongMode(LV_LABEL_LONG_MODE_DOTS);  // two lines at most: the button starts at y 172
+    lv_obj_set_height(_detail->get(), 38);
     _detail->align(LV_ALIGN_TOP_LEFT, 182, 132);
     _detail->setText("");
 
@@ -790,10 +813,10 @@ void AppEmbodyMode::render()
             _rendered_url.clear();
             _status->setText(_client ? "On " + _servers[_server_index].name : "No server pinned");
             lv_obj_add_flag(_qr, LV_OBJ_FLAG_HIDDEN);
-            _qr_hint->setText("Not connected");
+            _qr_hint->setText("Not connected\n\n" + server_details(_servers[_shown_index].url));
             _qr_hint->setHidden(false);
             _code->setText("");
-            _detail->setText(_client ? "Connect to switch" : "Next to choose, Connect to start");
+            _detail->setText(_client ? "Connect to switch" : "Next: choose\nConnect: start");
         }
         return;
     }
@@ -1117,16 +1140,18 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         // {"server": url or name}; "" clears it (the robot then asks at start)
         const std::string key = args["server"] | "";
         const int i           = find_server(key);
-        if (i >= 0 || key.empty()) {
-            _default_url = i >= 0 ? _servers[i].url : "";
+        if (key.empty()) {  // no default: the robot asks at start (needs no Yes)
+            _default_url = "";
             save_servers();
+        } else if (i >= 0 && _servers[i].url != _default_url) {
+            request_server_change(i, true);  // a new default: asked on the robot's screen
         }
         announce_servers();
     } else if (command == "server_switch") {
         // Leaves this server: the robot reconnects to the other one right away
         const int i = find_server(args["server"] | "");
         if (i >= 0 && (size_t)i != _server_index) {
-            _pending_switch = i;
+            request_server_change(i, false);  // asked on the robot's screen first
         }
     } else if (command == "snapshot") {
         _snapshot_requested = true;  // taken in the app loop, outside the LVGL lock
@@ -1935,6 +1960,48 @@ void AppEmbodyMode::request_rotate(int velocity, int seconds)
                         30, [answer = _rotate_answer](bool yes) { *answer = yes ? 1 : -1; });
     queue_event("rotate_asking");
     mclog::tagInfo(_tag, "rotate: asking on the screen");
+}
+
+// Another server or a new default, asked by a server: only the person at the robot says Yes
+// (the QR screen's own Connect and Pin need no question: the person is already there).
+void AppEmbodyMode::request_server_change(int index, bool makeDefault)
+{
+    if (_server_answer) {
+        queue_event("server_refused", {}, {{"reason", "another question is open on the robot"}});
+        return;
+    }
+    const auto& e       = _servers[index];
+    _server_ask_url     = e.url;
+    _server_ask_default = makeDefault;
+    _server_answer      = std::make_shared<std::atomic<int>>(0);
+    embody::askOnScreen(makeDefault ? "Start with " + e.name + "?" : "Connect to " + e.name + "?",
+                        host_of(e.url) + (makeDefault ? "\nasked by a server: tap Yes to make it the server this robot starts with."
+                                                      : "\nasked by a server: tap Yes to switch to it now."),
+                        60, [answer = _server_answer](bool yes) { *answer = yes ? 1 : -1; });
+    queue_event("server_asking", {}, {{"server", e.url}, {"change", makeDefault ? "default" : "switch"}});
+    mclog::tagInfo(_tag, "server {}: asking on the screen ({})", makeDefault ? "default" : "switch", e.url);
+}
+
+void AppEmbodyMode::update_server_question()
+{
+    if (!_server_answer || *_server_answer == 0) {
+        return;
+    }
+    const bool yes = *_server_answer == 1;
+    _server_answer.reset();
+    const int i = find_server(_server_ask_url);
+    if (!yes || i < 0) {
+        queue_event("server_refused", {}, {{"server", _server_ask_url}, {"reason", "not confirmed on the robot"}});
+        mclog::tagInfo(_tag, "server change not confirmed on the robot");
+        return;
+    }
+    if (_server_ask_default) {
+        _default_url = _servers[i].url;
+        save_servers();
+        announce_servers();
+    } else if ((size_t)i != _server_index) {
+        _pending_switch = i;
+    }
 }
 
 void AppEmbodyMode::update_rotate_question()

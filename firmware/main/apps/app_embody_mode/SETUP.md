@@ -299,6 +299,11 @@ Embody Mode, so use it only with a server you trust.
 - **Setup over USB trusts the cable,** with one tap: a new default server needs a **Yes** on
   the robot's screen ("Connect to …?"); Wi-Fi, autostart and servers that are not the default
   need no tap. Having the robot in hand is the proof of ownership, as with its QR code.
+- **A paired browser** may switch the robot to another server or make one the default only
+  after a **Yes** on the robot's screen.
+- **Control over USB** (taps from a program, release firmware): the first tap asks on the
+  screen "Let the computer on USB use the screen?"; the Yes lasts until the cable is unplugged.
+  USB taps can never answer the robot's own questions.
 - **End-to-end encryption:** when it is on for a server, the relay carries only ciphertext
   between the robot and the browsers enrolled through its QR code
   ([e2ee.md](https://github.com/mj41/home-w42-eu/blob/main/docs/e2ee.md)).
