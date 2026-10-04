@@ -151,8 +151,11 @@ private:
     bool _e2e_ok = false;
     bool _boot_stable = false;  // ran a minute: the boot-loop guard counts from zero again
     bool _wifi_low_latency = false;  // Wi-Fi power save off while someone uses the robot
-    uint32_t _rotate_check_ms = 0;   // rotation: last servo load check
-    uint32_t _rotate_stall_ms = 0;   // rotation: since when the yaw load is high (0: not)
+    uint32_t _rotate_check_ms = 0;   // rotation: last servo feedback check
+    uint32_t _rotate_stall_ms = 0;   // rotation: since when the head has not moved (0: it moves)
+    uint32_t _rotate_start_ms = 0;
+    int _rotate_last_pos      = -1;  // raw yaw position at the last check (-1: none yet)
+    std::string _rotate_trace;       // "ms:pos:speed:current:load;" every check, sent as rotate_trace
     uint32_t _ps_seen_commands = 0;  // the client's command count when power save last looked
     uint32_t _last_command_ms = 0;   // when a command last arrived (any, ping too)
     std::string _published_pair;  // the pairing link given to the USB setup ({"op":"pair"})

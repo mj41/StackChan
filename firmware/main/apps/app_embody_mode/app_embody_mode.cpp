@@ -1979,11 +1979,17 @@ void AppEmbodyMode::start_rotate(int velocity, int seconds)
     pause_angle_sync();
     auto& m = GetStackChan().motion();
     m.setAutoTorqueReleaseEnabled(false);  // the release check would stop the wheel mode
+    m.yawServo().setTorqueEnabled(true);  // off after a start or at rest: wheel mode would not turn
     m.yawServo().rotate(velocity);
     const bool was_rotating = _rotate_until != 0;
     _rotate_until           = std::max<uint32_t>(GetHAL().millis() + seconds * 1000u, 1);
     _rotate_check_ms        = GetHAL().millis();
     _rotate_stall_ms        = 0;
+    if (!was_rotating) {
+        _rotate_start_ms  = _rotate_check_ms;
+        _rotate_last_pos  = -1;
+        _rotate_trace.clear();
+    }
     if (!was_rotating) {
         queue_event("rotate_on", {{"velocity", (double)velocity}, {"seconds", (double)seconds}});
     }
@@ -2003,8 +2009,23 @@ void AppEmbodyMode::check_rotate_safety()
     if (!GetHAL().readServoStatus(1, servo)) {
         return;
     }
-    const float load = std::abs(servo.load / 10.0f);  // percent
-    if (load < 80.0f) {
+    if (_rotate_trace.size() < 4000) {
+        _rotate_trace += fmt::format("{}:{}:{}:{}:{};", now - _rotate_start_ms, servo.position, servo.speed, servo.current,
+                                     servo.load);
+    }
+    // In wheel mode the servo's "load" is only the commanded drive, so a held head shows up as a
+    // position that stops changing. Raw positions wrap at 1024.
+    if (servo.position < 0 || servo.position > 1023) {
+        return;
+    }
+    int moved = 0;
+    if (_rotate_last_pos >= 0) {
+        moved = (servo.position - _rotate_last_pos + 1024) % 1024;
+        moved = std::min(moved, 1024 - moved);
+    }
+    const bool first = _rotate_last_pos < 0;
+    _rotate_last_pos = servo.position;
+    if (first || now - _rotate_start_ms < 600 || moved >= 2) {  // starting up, or turning
         _rotate_stall_ms = 0;
         return;
     }
@@ -2012,8 +2033,9 @@ void AppEmbodyMode::check_rotate_safety()
         _rotate_stall_ms = now;
     } else if (now - _rotate_stall_ms >= 600) {
         stop_rotate();
-        queue_event("rotate_stopped", {{"load_pct", load}}, {{"reason", "stall: high servo load"}});
-        mclog::tagWarn(_tag, "rotate stopped: yaw load {:.0f}%", load);
+        queue_event("rotate_stopped", {{"position", (double)servo.position}, {"current", (double)servo.current}},
+                    {{"reason", "stall: the head stopped turning"}});
+        mclog::tagWarn(_tag, "rotate stopped: stall at raw position {}", servo.position);
     }
 }
 
@@ -2033,6 +2055,10 @@ void AppEmbodyMode::stop_rotate()
     m.setAutoTorqueReleaseEnabled(!_hold_until);
     _last_motion_tick = GetHAL().millis();
     queue_event("rotate_off");
+    if (!_rotate_trace.empty()) {  // the feedback during the rotation, to tune the stall check
+        queue_event("rotate_trace", {}, {{"samples", _rotate_trace}});
+        _rotate_trace.clear();
+    }
     mclog::tagInfo(_tag, "rotate off");
 }
 
