@@ -90,7 +90,10 @@ private:
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
     bool _qr_back_to_app      = false;  // Connect on the QR screen: its face once connected
-    std::atomic<bool> _reset_app_look{false};  // another app now: the last one's sprites, picture, LEDs go
+    std::atomic<bool> _reset_app_look{false};  // another app now: reset_for_app
+    std::string _last_app_url;                  // the app connect_server last went to
+    uint8_t _start_volume = 50;                 // the speaker volume at start: every app starts with it
+    std::vector<std::pair<std::string, std::string>> _pending_managed;  // ManagedApps (payload, sig), for the loop
     bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;
@@ -357,6 +360,7 @@ private:
     void wake_screen();
     uint32_t touch_idle_ms();
     void run_command(const std::string& command, const std::string& args);
+    void reset_for_app();
     void add_sensor_telemetry(embody::Client::Telemetry& t);
     void update_light();
     void update_ir();

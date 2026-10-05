@@ -282,6 +282,7 @@ void AppEmbodyMode::onOpen()
         _nfc_enabled = true;
         start_nfc();
     }
+    _start_volume = GetHAL().getSpeakerVolume();  // every app starts with it (reset_for_app)
 
     temperature_sensor_config_t tsens_config = TEMPERATURE_SENSOR_CONFIG_DEFAULT(10, 80);
     if (temperature_sensor_install(&tsens_config, &_tsens) != ESP_OK) {
@@ -401,25 +402,18 @@ void AppEmbodyMode::onRunning()
 
     prepare_pictures();  // decode stored pictures before taking the LVGL lock
     LvglLockGuard lock;
+    for (const auto& [payload, sig] : _pending_managed) {
+        apply_managed(payload, sig);
+    }
+    _pending_managed.clear();
+    if (_reset_app_look.exchange(false)) {  // under the LVGL lock: before the new app's commands
+        reset_for_app();
+    }
     for (const auto& [command, args] : _pending_commands) {
         run_command(command, args);
     }
     _pending_commands.clear();
 
-    if (_reset_app_look.exchange(false)) {  // under the LVGL lock: a new app starts with the robot's face
-        _sprite_layer.clear();
-        _picture_asset.clear();
-        lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
-        lv_image_set_src(_picture_obj, nullptr);
-        _picture.reset();
-        if (GetStackChan().hasAvatar()) {
-            GetStackChan().avatar().setEmotion(avatar::Emotion::Neutral);
-        }
-        ArduinoJson::JsonDocument off;
-        off["left"]  = "#000000";
-        off["right"] = "#000000";
-        run_leds(off);
-    }
     if (_pending_picture) {
         _picture = std::move(_pending_picture);  // keep the pixels alive while shown
         lv_image_set_src(_picture_obj, _picture->image_dsc());
@@ -2639,6 +2633,32 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
 }
 
 // (Re)connects to _servers[index]: a fresh client with that URL and token.
+// Every app starts from the same robot: its face, the head forward and powered, nothing streaming,
+// playing, turning or lit, the screen on with auto-brightness, the volume it started with. What
+// the last app drew, moved or turned on is not the next one's. LVGL lock held.
+void AppEmbodyMode::reset_for_app()
+{
+    static const std::pair<const char*, const char*> defaults[] = {
+        {"camera", R"({"on":false})"},       {"mic", R"({"on":false})"},          {"imu_stream", R"({"on":false})"},
+        {"touch_stream", R"({"on":false})"}, {"light_stream", R"({"on":false})"}, {"play_stop", "{}"},
+        {"rotate", R"({"velocity":0})"},     {"hold", R"({"seconds":0})"},        {"servo_power", R"({"on":true})"},
+        {"home", "{}"},                      {"proximity", R"({"on":true})"},     {"brightness", R"({"auto":true})"},
+        {"screensaver", R"({"on":false})"},  {"sprite_clear", "{}"},              {"face", "{}"},
+        {"emotion", R"({"name":"neutral"})"}, {"leds", R"({"left":"#000000","right":"#000000"})"},
+        {"car_stop", "{}"},
+    };
+    const std::string last = _last_command;
+    for (const auto& [command, args] : defaults) {
+        run_command(command, args);
+    }
+    _last_command = last;  // not one of these on the status screen
+    if (_nfc && !_nfc_enabled) {
+        run_command("nfc", R"({"on":true})");
+    }
+    GetHAL().setSpeakerVolume(_start_volume);
+    mclog::tagInfo(_tag, "a new app: sensors and actuators back to the defaults");
+}
+
 void AppEmbodyMode::connect_server(size_t index)
 {
     if (_servers.empty()) {
@@ -2754,9 +2774,15 @@ void AppEmbodyMode::connect_server(size_t index)
         return t;
     };
 
-    _client->onManagedApps = [this](const std::string& payload, const std::string& sig) { apply_managed(payload, sig); };
+    // Applied in the loop under the LVGL lock, like commands: it may ask on the screen.
+    _client->onManagedApps = [this](const std::string& payload, const std::string& sig) {
+        _pending_managed.emplace_back(payload, sig);
+    };
     _servers_announced = false;  // tell the new server the list once registered
-    _reset_app_look    = true;   // what the last app drew (its face, a picture, LEDs) is not this one's
+    if (_servers[index].url != _last_app_url) {  // another app (not the same one again: car_board)
+        _reset_app_look = true;  // what the last app drew, moved or turned on is not this one's
+        _last_app_url   = _servers[index].url;
+    }
 }
 
 /* ---------------------------------- IR ------------------------------------ */
