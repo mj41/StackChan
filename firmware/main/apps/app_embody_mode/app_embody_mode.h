@@ -371,7 +371,7 @@ private:
     int find_server(const std::string& key);
     static void on_server_nav(lv_event_t* e);
     void send_imu_stream();
-    void request_server_change(int index, bool makeDefault);
+    void request_server_change(int index, bool makeDefault, const std::string& by = "a server");
     void update_server_question();
     void request_rotate(int velocity, int seconds);
     void update_rotate_question();

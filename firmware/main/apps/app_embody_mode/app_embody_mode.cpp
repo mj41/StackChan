@@ -1206,7 +1206,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         // Leaves this server: the robot reconnects to the other one right away
         const int i = find_server(args["server"] | "");
         if (i >= 0 && (size_t)i != _server_index) {
-            request_server_change(i, false);  // asked on the robot's screen first
+            request_server_change(i, false, _servers[_server_index].name);  // asked on the robot's screen first
         }
     } else if (command == "snapshot") {
         _snapshot_requested = true;  // taken in the app loop, outside the LVGL lock
@@ -2036,7 +2036,7 @@ void AppEmbodyMode::request_rotate(int velocity, int seconds)
 
 // Another server or a new default, asked by a server: only the person at the robot says Yes
 // (the QR screen's own Connect and Pin need no question: the person is already there).
-void AppEmbodyMode::request_server_change(int index, bool makeDefault)
+void AppEmbodyMode::request_server_change(int index, bool makeDefault, const std::string& by)
 {
     if (_server_answer) {
         queue_event("server_refused", {}, {{"reason", "another question is open on the robot"}});
@@ -2047,8 +2047,8 @@ void AppEmbodyMode::request_server_change(int index, bool makeDefault)
     _server_ask_default = makeDefault;
     _server_answer      = std::make_shared<std::atomic<int>>(0);
     embody::askOnScreen(makeDefault ? "Start with " + e.name + "?" : "Connect to " + e.name + "?",
-                        host_of(e.url) + (makeDefault ? "\nasked by a server: tap Yes to make it the server this robot starts with."
-                                                      : "\nasked by a server: tap Yes to switch to it now."),
+                        host_of(e.url) + "\nasked by " + by +
+                            (makeDefault ? ": tap Yes to make it the app this robot starts with." : ": tap Yes to switch to it now."),
                         60, [answer = _server_answer](bool yes) { *answer = yes ? 1 : -1; });
     queue_event("server_asking", {}, {{"server", e.url}, {"change", makeDefault ? "default" : "switch"}});
     mclog::tagInfo(_tag, "server {}: asking on the screen ({})", makeDefault ? "default" : "switch", e.url);
@@ -2482,7 +2482,8 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     if (const std::string name = doc["name"] | ""; !name.empty() && name.size() <= 64) {
         m->name = name;  // the manager's name may change
     }
-    const bool askPin = m->askPin;
+    const bool askPin       = m->askPin;
+    const std::string mname = m->name.empty() ? "its manager" : m->name;
     embody::saveManagers(managers);
     const int cur  = find_server(current);
     const int show = find_server(shown);
@@ -2501,7 +2502,7 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     mclog::tagInfo(_tag, "managed apps from {}: version {}, {} servers", id, version, _servers.size());
     if (const int p = find_server(pin); p >= 0 && pin != _default_url) {
         if (askPin) {
-            request_server_change(p, true);  // asked on the robot's screen
+            request_server_change(p, true, mname);  // asked on the robot's screen
         } else {
             _default_url = pin;
             save_servers();
@@ -2511,6 +2512,15 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     if (cur < 0) {  // the app it is on was removed (its token no longer works): to the start app
         const int def   = find_server(_default_url);
         _pending_switch = def < 0 ? 0 : def;
+    }
+    // "switch": the owner opened one of its apps on the manager's page: go there now (once: this
+    // version only), asked on the screen like a new start app.
+    if (const int s = find_server(doc["switch"] | ""); s > 0 && (size_t)s != _server_index) {
+        if (askPin) {
+            request_server_change(s, false, mname);
+        } else {
+            _pending_switch = s;
+        }
     }
 }
 
