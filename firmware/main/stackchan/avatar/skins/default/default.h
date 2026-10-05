@@ -84,6 +84,10 @@ public:
     void clearSpeech() override;
     void setVisible(bool visible) override;
     void setTextFont(void* font) override;
+    lv_obj_t* getObject() override
+    {
+        return _container->get();
+    }
 
 private:
     std::unique_ptr<uitk::lvgl_cpp::Container> _container;

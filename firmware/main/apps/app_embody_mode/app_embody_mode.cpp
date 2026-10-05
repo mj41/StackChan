@@ -3,6 +3,9 @@
  *
  * SPDX-License-Identifier: MIT
  */
+#include <mbedtls/base64.h>
+#include <mbedtls/sha256.h>
+#include <mbedtls/pk.h>
 #include "app_embody_mode.h"
 #include <apps/common/common.h>
 #include <apps/common/loading_page/loading_page.h>
@@ -148,9 +151,9 @@ void AppEmbodyMode::onOpen()
     }
 
     if (!set_up) {  // nothing to contact: no Wi-Fi, no hotspot, only how to set it up
-        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu/setup");
+        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu");
         LvglLockGuard lock;
-        _status->setText("Not set up yet: plug me into a computer and open sm.w42.eu/setup in Chrome");
+        _status->setText("Not set up yet: plug me into a computer and open sm.w42.eu in Chrome");
         return;
     }
 
@@ -293,6 +296,7 @@ void AppEmbodyMode::onRunning()
         if (nav == 2) {  // Pin: make the shown server the default, or clear it if it is already
             const auto& url = _servers[_shown_index].url;
             _default_url    = _default_url == url ? "" : url;
+            mclog::tagInfo(_tag, "qr: pin {}", _default_url.empty() ? "cleared" : url);
             save_servers();
             announce_servers();
             _servers_rev++;
@@ -301,11 +305,19 @@ void AppEmbodyMode::onRunning()
                 _qr_hide_requested = true;
             } else {
                 _pending_switch = (int)_shown_index;
-                _qr_pinned      = true;  // chosen on the QR screen: stay there for its code
+                _qr_back_to_app = true;  // back to the app's face once connected (its QR: the QR button)
+                mclog::tagInfo(_tag, "qr: connect to {}", _servers[_shown_index].url);
             }
         } else if (_servers.size() > 1) {  // Next: only browse, the connection stays
-            _shown_index = (_shown_index + 1) % _servers.size();
+            // The release's empty "Set up: sm.w42.eu" entry only while there is nothing else.
+            for (size_t i = 0; i < _servers.size(); i++) {
+                _shown_index = (_shown_index + 1) % _servers.size();
+                if (!_servers[_shown_index].url.empty()) {
+                    break;
+                }
+            }
             _servers_rev++;
+            mclog::tagInfo(_tag, "qr: next, shows {}", _servers[_shown_index].url);
         }
     }
     if (_pending_switch >= 0) {
@@ -321,6 +333,10 @@ void AppEmbodyMode::onRunning()
         if (_client->isRegistered() && !_servers_announced) {
             _servers_announced = true;
             announce_servers();
+            {
+                std::lock_guard<std::mutex> lock(_event_mutex);
+                _app_card_text = _servers[_server_index].name;
+            }
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
             queue_event("automation", {{"autostart", embody::autostart() ? 1.0 : 0.0}});
 #endif
@@ -394,6 +410,30 @@ void AppEmbodyMode::onRunning()
         _picture_asset = "sent";
         wake_screen();
     }
+    if (_app_card) {
+        std::string text;
+        {
+            std::lock_guard<std::mutex> lock(_event_mutex);
+            text.swap(_app_card_text);
+        }
+        const uint32_t now = GetHAL().millis();
+        if (!text.empty()) {
+            lv_label_set_text(_app_card, text.c_str());
+            lv_label_set_text(_app_badge, text.c_str());
+            lv_obj_remove_flag(_app_card, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(_app_card);
+            _app_card_until = now + 2500;
+        } else if (_app_card_until && (int32_t)(now - _app_card_until) >= 0) {
+            lv_obj_add_flag(_app_card, LV_OBJ_FLAG_HIDDEN);
+            _app_card_until = 0;
+        }
+        // The badge: while connected, not over the card, the QR screen (it names the app) or a
+        // blank screen.
+        const bool badge = _client && _client->isRegistered() && !_app_card_until && !_qr_visible && !_blank_screen;
+        if (badge == lv_obj_has_flag(_app_badge, LV_OBJ_FLAG_HIDDEN)) {
+            badge ? lv_obj_remove_flag(_app_badge, LV_OBJ_FLAG_HIDDEN) : lv_obj_add_flag(_app_badge, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     if (_live_badge) {
         bool live = _camera_on || _mic_running;
         if (live == lv_obj_has_flag(_live_badge, LV_OBJ_FLAG_HIDDEN)) {
@@ -412,6 +452,7 @@ void AppEmbodyMode::onRunning()
         _published_pair = pair;
         embody::setPairUrl(pair);
     }
+    publish_status(now);
     // Wi-Fi modem sleep makes every packet to the robot wait for the next beacon (up to about
     // 100 ms): off for 2 minutes after the last command and while the camera or microphone
     // streams, on otherwise (it saves battery). The first command after a quiet spell is slow.
@@ -452,6 +493,7 @@ void AppEmbodyMode::onClose()
 {
     mclog::tagInfo(_tag, "on close");
     embody::setPairUrl("");
+    embody::setStatus("");  // not running: {"op":"status"} says so
     if (_wifi_low_latency) {
         esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
         _wifi_low_latency = false;
@@ -509,6 +551,12 @@ void AppEmbodyMode::onClose()
         if (_live_badge) {
             lv_obj_delete(_live_badge);
             _live_badge = nullptr;
+        }
+        if (_app_card) {
+            lv_obj_delete(_app_card);
+            _app_card = nullptr;
+            lv_obj_delete(_app_badge);
+            _app_badge = nullptr;
         }
         _sprite_layer.destroy();
         if (_picture_obj) {
@@ -645,6 +693,11 @@ void AppEmbodyMode::create_view()
     lv_obj_set_size(_picture_obj, 320, 240);
     lv_obj_align(_picture_obj, LV_ALIGN_CENTER, 0, 0);
     _sprite_layer.create(lv_screen_active());  // above the face and pictures, below the QR panel
+    // The speech bubble above the sprites (an app's drawn face must not hide what the robot says),
+    // still below the QR panel: moved out of the avatar's panel onto the screen, at the same place.
+    if (auto& bubble = GetStackChan().avatar().getKeyElements().speechBubble; bubble && bubble->getObject()) {
+        lv_obj_set_parent(bubble->getObject(), lv_screen_active());
+    }
     lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
     listen(_picture_obj);
 
@@ -764,6 +817,29 @@ void AppEmbodyMode::create_view()
     lv_obj_align(_live_badge, LV_ALIGN_TOP_LEFT, 6, 32);
     lv_obj_add_flag(_live_badge, LV_OBJ_FLAG_HIDDEN);
 
+    _app_card = lv_label_create(lv_layer_top());
+    lv_obj_set_style_text_font(_app_card, &lv_font_montserrat_24, 0);
+    lv_obj_set_style_text_color(_app_card, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_bg_color(_app_card, lv_color_hex(0x3949AB), 0);
+    lv_obj_set_style_bg_opa(_app_card, LV_OPA_90, 0);
+    lv_obj_set_style_radius(_app_card, 14, 0);
+    lv_obj_set_style_pad_hor(_app_card, 18, 0);
+    lv_obj_set_style_pad_ver(_app_card, 8, 0);
+    lv_obj_align(_app_card, LV_ALIGN_TOP_MID, 0, 10);
+    lv_obj_add_flag(_app_card, LV_OBJ_FLAG_HIDDEN);
+
+    _app_badge = lv_label_create(lv_layer_top());
+    lv_obj_set_style_text_font(_app_badge, &lv_font_montserrat_14, 0);
+    lv_obj_set_style_text_color(_app_badge, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_style_text_opa(_app_badge, LV_OPA_80, 0);
+    lv_obj_set_style_bg_color(_app_badge, lv_color_hex(0x000000), 0);
+    lv_obj_set_style_bg_opa(_app_badge, LV_OPA_40, 0);
+    lv_obj_set_style_radius(_app_badge, 8, 0);
+    lv_obj_set_style_pad_hor(_app_badge, 7, 0);
+    lv_obj_set_style_pad_ver(_app_badge, 2, 0);
+    lv_obj_align(_app_badge, LV_ALIGN_TOP_RIGHT, -6, 6);
+    lv_obj_add_flag(_app_badge, LV_OBJ_FLAG_HIDDEN);
+
     view::create_home_indicator([&]() { close(); }, _color_theme, _color_text);
     // Second button in the swipe-up bar: show or hide the pairing QR screen
     view::set_home_indicator_extra_button("QR", [this]() { _toggle_qr_requested = true; });
@@ -787,6 +863,12 @@ void AppEmbodyMode::render()
             wake_screen();
         }
         _rendered_viewers = _client->viewers();
+    }
+    if (_qr_back_to_app && _client && _client->isRegistered() && _qr_visible) {
+        _qr_back_to_app = false;
+        _qr_visible     = false;
+        _qr_pinned      = false;
+        changed         = true;
     }
     if (_toggle_qr_requested.exchange(false) && (!_client || _client->isRegistered())) {
         _qr_visible = !_qr_visible;
@@ -1837,6 +1919,13 @@ void AppEmbodyMode::speaker_task(void* arg)
 
 static constexpr uint32_t _prox_interval_ms  = 200;
 static constexpr uint32_t _light_interval_ms = 500;
+// Auto-brightness: the room's light, not a hand. Readings during a touch (screen or head), a hand
+// near the sensor or a big jump in proximity, and for _light_calm_ms after, are left out; the
+// brightness then moves at most _bright_step points every _bright_every_ms.
+static constexpr uint32_t _light_calm_ms   = 10000;
+static constexpr int _prox_jump            = 80;  // between two readings: something moves close by
+static constexpr uint32_t _bright_every_ms = 2000;
+static constexpr int _bright_step          = 5;
 static constexpr uint32_t _light_stream_ms   = 50;  // stream sample period; the sensor reads proximity every 50 ms, light every 100 ms
 // Proximity above the "nobody near" baseline: enter near / leave near (hysteresis).
 static constexpr float _prox_near_delta = 150;
@@ -1861,6 +1950,9 @@ void AppEmbodyMode::update_light()
     uint16_t ps = 0;
     if (_proximity_on && now - _last_prox_read >= prox_every && _light->readProximity(ps)) {
         _last_prox_read = now;
+        if (std::abs((int)ps - (int)_proximity) > _prox_jump || _near) {
+            _light_unsteady_at = now;  // a hand (or something) near the light sensor
+        }
         _proximity      = ps;
         if (_prox_base < 0) {
             _prox_base = ps;
@@ -1888,12 +1980,19 @@ void AppEmbodyMode::update_light()
     if (now - _last_light_read >= light_every && _light->readLux(lux, &_light_ch0, &_light_ch1)) {
         _last_light_read = now;
         if (now - _last_lux_update >= _light_interval_ms) {  // lux and auto-brightness keep the slow pace
-            _last_lux_update = now;
-            _lux             = _lux < 0 ? lux : _lux + (lux - _lux) * 0.3f;
-            if (_auto_brightness && !_standby_until) {
-                const int target = brightness_for_lux(_lux);
-                if (std::abs(target - (int)GetHAL().getBackLightBrightness()) >= 4) {
-                    GetHAL().setBackLightBrightness(target);  // not saved; the backlight fades
+            _last_lux_update  = now;
+            const bool steady = touch_idle_ms() >= _light_calm_ms && now - _light_unsteady_at >= _light_calm_ms;
+            if (_lux < 0) {
+                _lux = lux;
+            } else if (steady) {
+                _lux += (lux - _lux) * 0.1f;  // about 5 s to follow a change in the room
+            }
+            if (_auto_brightness && !_standby_until && steady && now - _last_auto_bright >= _bright_every_ms) {
+                const int target  = brightness_for_lux(_lux);
+                const int current = (int)GetHAL().getBackLightBrightness();
+                if (std::abs(target - current) >= 6) {
+                    _last_auto_bright = now;
+                    GetHAL().setBackLightBrightness(current + std::clamp(target - current, -_bright_step, _bright_step));
                 }
             }
         }
@@ -2276,7 +2375,7 @@ void AppEmbodyMode::load_servers()
     // A release build has no built-in server: it is set up over USB (usb_setup.h), which
     // adds the server and makes it the default.
     const std::string builtin = CONFIG_STACKCHAN_EMBODY_SERVER_URL;
-    _servers.push_back({builtin.empty() ? "Set up: sm.w42.eu/setup" : host_of(builtin), builtin,
+    _servers.push_back({builtin.empty() ? "Set up: sm.w42.eu" : host_of(builtin), builtin,
                         CONFIG_STACKCHAN_EMBODY_TOKEN, "built-in"});
     Settings settings("embody", false);
     ArduinoJson::JsonDocument doc;
@@ -2355,6 +2454,157 @@ void AppEmbodyMode::merge_offers(const std::string& serversJson)
     announce_servers();
 }
 
+// The manager's signature on a ManagedApps payload: ECDSA P-256 over SHA-256, with its key from the
+// USB setup (base64 DER, SubjectPublicKeyInfo).
+static bool b64decode(const std::string& in, std::string& out)
+{
+    size_t olen = 0;
+    out.resize(in.size());
+    if (mbedtls_base64_decode((unsigned char*)out.data(), out.size(), &olen, (const unsigned char*)in.data(), in.size()) != 0) {
+        return false;
+    }
+    out.resize(olen);
+    return true;
+}
+
+static bool manager_signed(const std::string& keyB64, const std::string& payload, const std::string& sigB64)
+{
+    std::string key, sig;
+    if (!b64decode(keyB64, key) || !b64decode(sigB64, sig) || sig.empty()) {
+        return false;
+    }
+    unsigned char hash[32];
+    mbedtls_pk_context pk;
+    mbedtls_pk_init(&pk);
+    const bool ok = mbedtls_pk_parse_public_key(&pk, (const unsigned char*)key.data(), key.size()) == 0 &&
+                    mbedtls_pk_can_do(&pk, MBEDTLS_PK_ECDSA) &&
+                    mbedtls_sha256((const unsigned char*)payload.data(), payload.size(), hash, 0) == 0 &&
+                    mbedtls_pk_verify(&pk, MBEDTLS_MD_SHA256, hash, sizeof hash, (const unsigned char*)sig.data(),
+                                      sig.size()) == 0;
+    mbedtls_pk_free(&pk);
+    return ok;
+}
+
+// The robot's apps as its manager set them (ManagedApps, relayed by the server it is on). Only
+// when the owner allowed it at the USB setup, signed by the manager's key from that setup, for
+// this robot and newer than the last. The apps the manager put here ("manager") are replaced:
+// new ones come with their token, kept ones keep theirs, removed ones go. Apps added another way
+// stay. A new start app is asked on the screen unless the setup said not to ask.
+void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::string& sig)
+{
+    Settings settings("embody", false);
+    const std::string key = settings.GetString("mgr_key", "");
+    auto refuse           = [this](const char* reason) {
+        queue_event("apps_refused", {}, {{"reason", reason}});
+        mclog::tagInfo(_tag, "managed apps refused: {}", reason);
+    };
+    if (key.empty() || !settings.GetBool("mgr_remote", false)) {
+        return refuse("not allowed at the USB setup");
+    }
+    std::string payload;
+    if (!b64decode(payloadB64, payload) || !manager_signed(key, payload, sig)) {
+        return refuse("not signed by this robot's manager");
+    }
+    ArduinoJson::JsonDocument doc;
+    if (ArduinoJson::deserializeJson(doc, payload) || std::string(doc["robot"] | "") != _robot_id) {
+        return refuse("not for this robot");
+    }
+    const int32_t version = doc["version"] | 0;
+    if (version <= settings.GetInt("mgr_ver", 0)) {
+        return;  // had it already: every connection brings it
+    }
+    const std::string current = _servers[_server_index].url;
+    const std::string shown   = _servers[_shown_index].url;
+    std::vector<ServerEntry> next;
+    for (const auto& e : _servers) {
+        if (e.origin != "manager") {
+            next.push_back(e);
+        }
+    }
+    for (ArduinoJson::JsonObject o : doc["servers"].as<ArduinoJson::JsonArray>()) {
+        const std::string url = o["url"] | "";
+        if (url.rfind("ws://", 0) != 0 && url.rfind("wss://", 0) != 0) {
+            continue;
+        }
+        std::string token = o["token"] | "";
+        if (const int i = find_server(url); token.empty() && i >= 0) {
+            token = _servers[i].token;  // kept: the manager has only its hash
+        }
+        if (token.empty()) {
+            mclog::tagInfo(_tag, "managed app {} without a token: skipped", url);
+            continue;
+        }
+        next.erase(std::remove_if(next.begin(), next.end(), [&](const ServerEntry& e) { return e.url == url; }), next.end());
+        next.push_back({o["name"] | host_of(url).c_str(), url, token, "manager"});
+    }
+    _servers = next;
+    {
+        Settings rw("embody", true);
+        rw.SetInt("mgr_ver", version);
+    }
+    const int cur  = find_server(current);
+    const int show = find_server(shown);
+    _server_index  = cur < 0 ? 0 : cur;
+    _shown_index   = show < 0 ? _server_index : show;
+    const std::string pin = doc["pin"] | "";
+    if (find_server(_default_url) < 0) {  // the start app was removed
+        _default_url = find_server(pin) >= 0 ? pin : (_servers.size() > 1 ? _servers[1].url : _servers[0].url);
+    }
+    save_servers();
+    announce_servers();
+    queue_event("apps_updated", {{"version", (double)version}});
+    if (_client) {
+        _client->sendAppsVersion(version);  // for the manager, also when the server's traffic is sealed
+    }
+    mclog::tagInfo(_tag, "managed apps: version {}, {} servers", version, _servers.size());
+    if (const int p = find_server(pin); p >= 0 && pin != _default_url) {
+        if (settings.GetBool("pin_ask", true)) {
+            request_server_change(p, true);  // asked on the robot's screen
+        } else {
+            _default_url = pin;
+            save_servers();
+            announce_servers();
+        }
+    }
+    if (cur < 0) {  // the app it is on was removed (its token no longer works): to the start app
+        const int def   = find_server(_default_url);
+        _pending_switch = def < 0 ? 0 : def;
+    }
+}
+
+// What {"op":"status"} answers over USB (usb_setup.h), for tests and tools: the server it is on and
+// the connection, what the QR screen shows, the list without tokens. Once a second at most.
+void AppEmbodyMode::publish_status(uint32_t now)
+{
+    if (now - _status_at < 1000) {
+        return;
+    }
+    _status_at = now;
+    ArduinoJson::JsonDocument doc;
+    static const char* states[] = {"connecting", "registered", "offline", "rejected"};
+    doc["server"]   = _servers[_server_index].url;
+    doc["name"]     = _servers[_server_index].name;
+    doc["state"]    = _client ? states[(int)_client->state()] : "none";
+    doc["status"]   = _client ? _client->statusText() : "";
+    doc["qr"]       = _qr_visible;
+    doc["shown"]    = _servers[_shown_index].url;
+    doc["default"]  = _default_url;
+    doc["question"] = embody::questionOpen();
+    auto arr        = doc["servers"].to<ArduinoJson::JsonArray>();
+    for (const auto& e : _servers) {
+        auto o      = arr.add<ArduinoJson::JsonObject>();
+        o["name"]   = e.name;
+        o["url"]    = e.url;
+        o["origin"] = e.origin;
+    }
+    std::string json;
+    ArduinoJson::serializeJson(doc, json);
+    if (json != _published_status) {
+        _published_status = json;
+        embody::setStatus(json);
+    }
+}
+
 // The "servers" event: the list without tokens, the current and the default one.
 void AppEmbodyMode::announce_servers()
 {
@@ -2383,7 +2633,17 @@ void AppEmbodyMode::render_server_row()
     const auto& e         = _servers[_shown_index];
     const bool is_current = _client && _shown_index == _server_index;
     _title->setText(e.name);
-    _server_pos->setText(_servers.size() > 1 ? fmt::format("{}/{}", _shown_index + 1, _servers.size()) : "");
+    // Its place among the real apps (the release's empty "Set up" entry does not count).
+    size_t pos = 0, count = 0;
+    for (size_t i = 0; i < _servers.size(); i++) {
+        if (!_servers[i].url.empty()) {
+            count++;
+            if (i <= _shown_index) {
+                pos = count;
+            }
+        }
+    }
+    _server_pos->setText(count > 1 && !e.url.empty() ? fmt::format("{}/{}", pos, count) : "");
     const bool is_default = e.url == _default_url;
     lv_obj_set_style_bg_color(_server_buttons[0], lv_color_hex(is_default ? _color_theme : 0xE8EBFF), 0);
     lv_label_set_text(lv_obj_get_child(_server_buttons[2], 0), is_current ? "Back to app" : "Connect");
@@ -2411,7 +2671,7 @@ void AppEmbodyMode::connect_server(size_t index)
     }
     index = std::min(index, _servers.size() - 1);
     if (_servers[index].url.empty()) {  // the release build's empty built-in entry: nothing to contact
-        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu/setup");
+        mclog::tagInfo(_tag, "not set up: connect over USB at sm.w42.eu");
         return;
     }
     _server_index = index;
@@ -2454,10 +2714,11 @@ void AppEmbodyMode::connect_server(size_t index)
         .token     = _servers[index].token,
         .robotId   = _robot_id,
         .model     = "stackchan-cores3",
-        .firmware  = esp_app_get_description()->version,
+        .firmware  = embody::firmwareVersion(),
         .commands  = _commands,
         .measurements = measurements,
         .e2e          = _e2e_ok && is_e2e(_servers[index].url) ? &_e2e : nullptr,
+        .appsVersion  = Settings("embody", false).GetInt("mgr_ver", 0),
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
@@ -2519,6 +2780,7 @@ void AppEmbodyMode::connect_server(size_t index)
     };
 
     _client->onServerOffer = [this](const std::string& offers) { merge_offers(offers); };
+    _client->onManagedApps = [this](const std::string& payload, const std::string& sig) { apply_managed(payload, sig); };
     _servers_announced = false;  // tell the new server the list once registered
 }
 

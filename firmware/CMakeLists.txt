@@ -4,6 +4,11 @@ cmake_minimum_required(VERSION 3.16)
 
 set(PROJECT_VER "1.5.1")
 add_definitions(-DFIRMWARE_VERSION=\"${PROJECT_VER}\")
+# The Embody Mode release (release.sh passes -D EMBODY_VERSION=v0.3.0): what the robot reports as
+# its firmware over USB and to its servers. Unset in own builds: they report PROJECT_VER.
+if(EMBODY_VERSION)
+    add_definitions(-DEMBODY_VERSION=\"${EMBODY_VERSION}\")
+endif()
 
 # Add this line to disable the specific warning
 add_compile_options(-Wno-missing-field-initializers)

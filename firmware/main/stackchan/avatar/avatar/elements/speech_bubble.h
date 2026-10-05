@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "element.h"
+#include <lvgl.h>
 #include <string_view>
 #include <string>
 
@@ -28,6 +29,13 @@ public:
 
     virtual void setTextFont(void* font)
     {
+    }
+    /**
+     * @brief The bubble's LVGL object (nullptr if none), e.g. to lift it above other layers
+     */
+    virtual lv_obj_t* getObject()
+    {
+        return nullptr;
     }
 };
 

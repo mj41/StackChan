@@ -89,6 +89,7 @@ private:
     lv_obj_t* _server_buttons[3] = {};           // pin, next, back to app / connect
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
+    bool _qr_back_to_app      = false;  // Connect on the QR screen: its face once connected
     bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;
@@ -117,6 +118,11 @@ private:
 
     // "LIVE" badge on the top layer while the camera or microphone streams
     lv_obj_t* _live_badge = nullptr;
+    // The app's name for a moment after connecting, so a switch shows (even with sealed traffic).
+    lv_obj_t* _app_card       = nullptr;
+    std::string _app_card_text;  // set when registered (outside the LVGL lock), shown under it
+    uint32_t _app_card_until  = 0;
+    lv_obj_t* _app_badge      = nullptr;  // then a small label with its name, while connected
 
     // Screensaver: a blank screen. "Auto" after CONFIG_STACKCHAN_EMBODY_SCREENSAVER_S
     // without touch or command (commands and live media count as use); "manual"
@@ -164,6 +170,9 @@ private:
     uint32_t _ps_seen_commands = 0;  // the client's command count when power save last looked
     uint32_t _last_command_ms = 0;   // when a command last arrived (any, ping too)
     std::string _published_pair;  // the pairing link given to the USB setup ({"op":"pair"})
+    std::string _published_status;  // what {"op":"status"} answers over USB (publish_status)
+    uint32_t _status_at = 0;
+    void publish_status(uint32_t now);
     std::vector<std::string> _e2e_urls;
     void load_e2e_urls();
     bool is_e2e(const std::string& url) const;
@@ -202,6 +211,8 @@ private:
     uint32_t _last_light_read = 0;
     uint32_t _last_prox_read  = 0;
     uint32_t _last_lux_update = 0;  // auto-brightness keeps its slow pace while streaming
+    uint32_t _light_unsteady_at = 0;  // something moved near the sensor (proximity): lux unreliable
+    uint32_t _last_auto_bright  = 0;  // the last auto-brightness step
     // Raw light stream (binary 0x08), on while asked (light_stream): 20 samples/s.
     bool _light_streaming         = false;
     std::string _light_samples;  // pending: (uint32 ms, uint16 ps, uint16 ch0, uint16 ch1) each
@@ -353,6 +364,7 @@ private:
     void save_servers();
     void connect_server(size_t index);
     void merge_offers(const std::string& serversJson);
+    void apply_managed(const std::string& payloadB64, const std::string& sig);
     void announce_servers();
     void render_server_row();
     int find_server(const std::string& key);

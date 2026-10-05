@@ -3,7 +3,7 @@
 # sdkconfig.defaults.release (no server or token inside: a robot gets those as settings over
 # USB), never the local overlay. Run inside ESP-IDF (the release workflow, or
 # ./container.sh release). Writes build-release/dist: the parts, manifest.json with their
-# SHA-256 (for sm.w42.eu/setup), one merged image for 0x0, SHA256SUMS.
+# SHA-256 (for sm.w42.eu), one merged image for 0x0, SHA256SUMS.
 #
 #   ./release.sh [VERSION]      default: git describe of the last embody-v* tag
 set -euo pipefail
@@ -24,7 +24,7 @@ echo "SOURCE_DATE_EPOCH=$SOURCE_DATE_EPOCH (version $version)"
 # A clean build every time, as in CI: the configuration only from the defaults files, and every
 # object compiled with this commit's SOURCE_DATE_EPOCH (an incremental build keeps old ones).
 rm -rf build-release
-idf.py -B build-release -D STACKCHAN_RELEASE=1 -D SDKCONFIG=build-release/sdkconfig \
+idf.py -B build-release -D STACKCHAN_RELEASE=1 -D EMBODY_VERSION="$version" -D SDKCONFIG=build-release/sdkconfig \
     -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release" build
 
 dist=build-release/dist

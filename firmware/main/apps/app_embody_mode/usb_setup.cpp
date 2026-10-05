@@ -33,6 +33,13 @@ static constexpr const char* _prefix = "@stackchan ";
 
 static std::mutex s_pair_mutex;
 static std::string s_pair_url;
+static std::string s_status;  // Embody Mode's status JSON (setStatus), under s_pair_mutex
+
+void embody::setStatus(const std::string& json)
+{
+    std::lock_guard<std::mutex> lock(s_pair_mutex);
+    s_status = json;
+}
 
 void embody::setPairUrl(const std::string& url)
 {
@@ -74,7 +81,8 @@ static void reply_error(const char* error)
 }
 
 // The server entry, as Embody Mode keeps its list (NVS "embody": "servers", "default").
-static bool save_server(const std::string& name, const std::string& url, const std::string& token, bool makeDefault)
+static bool save_server(const std::string& name, const std::string& url, const std::string& token, bool makeDefault,
+                        const char* origin = "added")
 {
     if (url.rfind("ws://", 0) != 0 && url.rfind("wss://", 0) != 0) {
         return false;
@@ -97,7 +105,7 @@ static bool save_server(const std::string& name, const std::string& url, const s
     entry["name"]   = name.empty() ? url : name;
     entry["url"]    = url;
     entry["token"]  = token;
-    entry["origin"] = "added";
+    entry["origin"] = origin;
     std::string json;
     ArduinoJson::serializeJson(doc, json);
     settings.SetString("servers", json);
@@ -105,6 +113,28 @@ static bool save_server(const std::string& name, const std::string& url, const s
         settings.SetString("default", url);
     }
     return true;
+}
+
+// A manager's setup over USB: the robot's apps are exactly keep; every other stored server goes
+// (earlier setups, other managers, tests), so the QR screen shows only the apps chosen now.
+static void prune_managed(const std::vector<std::string>& keep)
+{
+    Settings settings("embody", true);
+    ArduinoJson::JsonDocument doc;
+    if (ArduinoJson::deserializeJson(doc, settings.GetString("servers", "[]")) || !doc.is<ArduinoJson::JsonArray>()) {
+        return;
+    }
+    ArduinoJson::JsonDocument out;
+    auto arr = out.to<ArduinoJson::JsonArray>();
+    for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
+        const std::string url = o["url"] | "";
+        if (std::find(keep.begin(), keep.end(), url) != keep.end()) {
+            arr.add(o);
+        }
+    }
+    std::string json;
+    ArduinoJson::serializeJson(out, json);
+    settings.SetString("servers", json);
 }
 
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
@@ -210,11 +240,21 @@ static void handle(const std::string& json)
     ArduinoJson::JsonDocument res;
     if (op == "hello") {
         res["ok"]         = true;
+        {
+            Settings settings("embody", false);
+            if (const std::string key = settings.GetString("mgr_key", ""); !key.empty()) {
+                auto m           = res["manager"].to<ArduinoJson::JsonObject>();
+                m["key"]         = key;
+                m["version"]     = settings.GetInt("mgr_ver", 0);
+                m["remote_apps"] = settings.GetBool("mgr_remote", false);
+                m["ask_pin"]     = settings.GetBool("pin_ask", true);
+            }
+        }
         std::string id = "stackchan-" + GetHAL().getFactoryMacString();  // as Embody Mode: lowercase
         std::transform(id.begin(), id.end(), id.begin(), [](unsigned char c) { return std::tolower(c); });
         res["id"]         = id;
         res["model"]      = "stackchan-cores3";
-        res["firmware"]   = esp_app_get_description()->version;
+        res["firmware"]   = embody::firmwareVersion();
         res["protocol"]   = 1;
         {
             Settings settings("embody", false);
@@ -297,13 +337,35 @@ static void handle(const std::string& json)
             mclog::tagInfo(_tag, "server {} saved{}", std::string(req["server"]["url"] | ""),
                            (req["default"] | false) ? " as the default" : "");
         }
-        // More servers (apps) at once; "pin" makes one of them the default at start.
+        // A manager's setup: its key (it signs the robot's app list when the owner changes it on the
+        // manager: ManagedApps), the list's version, and the owner's two choices. Only over USB.
+        const bool managed = req["manager"].is<ArduinoJson::JsonObject>();
+        if (managed) {
+            const std::string key = req["manager"]["key"] | "";
+            if (key.empty() || key.size() > 256) {
+                return reply_error("manager.key: the manager's public key (base64 DER)");
+            }
+            Settings settings("embody", true);
+            settings.SetString("mgr_key", key);
+            settings.SetInt("mgr_ver", req["manager"]["version"] | 0);
+            settings.SetBool("mgr_remote", req["manager"]["remote_apps"] | true);
+            settings.SetBool("pin_ask", req["manager"]["ask_pin"] | true);
+            applied.add("manager");
+            mclog::tagInfo(_tag, "manager key saved; remote app changes {}", (req["manager"]["remote_apps"] | true) ? "allowed" : "off");
+        }
+        // More servers (apps) at once; "pin" makes one of them the default at start. From a
+        // manager they are the robot's apps: they replace every stored server.
         if (req["servers"].is<ArduinoJson::JsonArray>()) {
+            std::vector<std::string> urls;
             for (ArduinoJson::JsonObject o : req["servers"].as<ArduinoJson::JsonArray>()) {
-                if (!save_server(o["name"] | "", o["url"] | "", o["token"] | "", false)) {
+                if (!save_server(o["name"] | "", o["url"] | "", o["token"] | "", false, managed ? "manager" : "added")) {
                     return reply_error("server url must start with ws:// or wss://");
                 }
+                urls.push_back(o["url"] | "");
                 mclog::tagInfo(_tag, "server {} saved", std::string(o["url"] | ""));
+            }
+            if (managed) {
+                prune_managed(urls);
             }
             applied.add("servers");
         }
@@ -326,6 +388,28 @@ static void handle(const std::string& json)
             mclog::tagInfo(_tag, "wifi {} saved", ssid);  // never the password
         }
         res["ok"] = true;
+        return reply(res);
+    }
+    if (op == "status") {  // read-only: what Embody Mode does now, and the manager settings
+        std::string st;
+        {
+            std::lock_guard<std::mutex> lock(s_pair_mutex);
+            st = s_status;
+        }
+        res["ok"] = true;
+        ArduinoJson::JsonDocument embodyDoc;
+        if (!st.empty() && !ArduinoJson::deserializeJson(embodyDoc, st)) {
+            res["embody"] = embodyDoc;
+        } else {
+            res["embody"] = nullptr;  // Embody Mode is not running
+        }
+        Settings settings("embody", false);
+        if (!settings.GetString("mgr_key", "").empty()) {
+            auto m           = res["manager"].to<ArduinoJson::JsonObject>();
+            m["version"]     = settings.GetInt("mgr_ver", 0);
+            m["remote_apps"] = settings.GetBool("mgr_remote", false);
+            m["ask_pin"]     = settings.GetBool("pin_ask", true);
+        }
         return reply(res);
     }
     if (op == "pair") {  // the link on the screen: physical access, like reading the QR code

@@ -5,7 +5,7 @@
 > sensor as raw data, and commands), switchable between servers and apps (a remote
 > dashboard, a pet, a cockpit that drives a TPBot car over BLE). See
 > [firmware/main/apps/app_embody_mode/README.md](firmware/main/apps/app_embody_mode/README.md),
-> and to set a robot up: one click in Chrome at [sm.w42.eu/setup](https://sm.w42.eu/setup), or your own
+> and to set a robot up: one click in Chrome at [sm.w42.eu](https://sm.w42.eu), or your own
 > server or build: [SETUP.md](firmware/main/apps/app_embody_mode/SETUP.md).
 > The robots are set up by [s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager) for the apps [s-w42-eu-raw](https://github.com/mj41/s-w42-eu-raw), [s-w42-eu-pet](https://github.com/mj41/s-w42-eu-pet)
 > and [s-w42-eu-sbot](https://github.com/mj41/s-w42-eu-sbot) ([s.w42.eu](https://s.w42.eu)); the car's micro:bit runs [tpbot-ble](https://github.com/mj41/tpbot-ble). All of them are part of

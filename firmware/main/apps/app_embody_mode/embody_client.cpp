@@ -182,6 +182,9 @@ void Client::connect()
     if (_config.e2e) {
         body["labels"]["e2e"] = "1";
     }
+    if (_config.appsVersion > 0) {
+        body["labels"]["apps_ver"] = std::to_string(_config.appsVersion);
+    }
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
     send(frame);
@@ -255,6 +258,10 @@ void Client::handle_frame(const Inbound& in)
             std::string servers;
             ArduinoJson::serializeJson(body["servers"], servers);
             onServerOffer(servers);
+        }
+    } else if (kind == "ManagedApps") {
+        if (onManagedApps) {
+            onManagedApps(body["payload"] | "", body["sig"] | "");
         }
     } else if (kind == "RobotCommand") {
         std::string command = body["command"] | "";
@@ -364,6 +371,14 @@ void Client::sendTelemetry(const Telemetry& t)
         measurements[key] = value;
     }
     send_report(doc);
+}
+
+void Client::sendAppsVersion(int32_t version)
+{
+    if (_state != State::Registered) {
+        return;
+    }
+    send("{\"kind\":\"AppsVersion\",\"meta\":{},\"body\":{\"version\":" + std::to_string(version) + "}}");
 }
 
 void Client::sendEvent(const std::string& name, const Telemetry& data, const Texts& text)

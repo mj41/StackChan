@@ -27,18 +27,24 @@ approve, each on a host of its own ([s.w42.eu](https://s.w42.eu) lists them): th
 [raw.sa.w42.eu](https://raw.sa.w42.eu) and the pet [pet.sa.w42.eu](https://pet.sa.w42.eu).
 
 1. Plug the robot into your computer: the USB-C port **on the robot's head** (the CoreS3).
-2. Open [sm.w42.eu/setup](https://sm.w42.eu/setup) in **Chrome or Edge** (they have Web
-   Serial; Firefox and Safari do not) and sign in with GitHub or Google.
-3. Tick the **apps** for your robot and pick the one it **Starts with**. Optional: tick **Start
-   Embody Mode when the robot turns on** (off by default; otherwise open it from the launcher).
-   In **Options**, your **Wi-Fi** name and password: they go to the robot over the cable, never
-   to the server.
-4. Press **Set up my robot** and pick the **USB JTAG/serial debug unit**.
+2. Open [sm.w42.eu](https://sm.w42.eu) in **Chrome or Edge** (they have Web Serial; Firefox
+   and Safari do not) and sign in with GitHub or Google.
+3. **Set up your robot:** press **Connect** and pick the **USB JTAG/serial debug unit**. The page
+   shows what it found on the robot.
+4. The choices are filled in; change what you want:
+   - **Apps:** all of them; ★ marks the one it starts with, × removes one.
+   - **Let sm.w42.eu change this robot's apps** (on): later you change its apps on the page, from
+     anywhere; the robot accepts only app lists signed by sm.w42.eu. Off: only over USB.
+   - **The robot asks on its screen before its start app changes** (on).
+   - **Wi-Fi and more:** your Wi-Fi name and password (they go to the robot over the cable,
+     never to the server), and **Start Embody Mode when the robot turns on** (off by default;
+     otherwise open it from the launcher).
+5. Press **Set up**.
 
 With **Back up the current firmware first** (on by default), the page first saves the robot's
 current firmware to your computer, where the browser keeps downloads (e.g. `~/Downloads`; about
 two minutes; keep the file private, it holds the robot's old settings too). The first backup is
-the robot's original. Options → Firmware → **Restore an earlier firmware** puts back the original
+the robot's original. The robot's **⋯** menu → **Restore an earlier firmware** puts back the original
 or the previous backup (the page checks the file against the robot's record of both); older
 backups only from a terminal (`esptool.py write_flash 0x0 <file>`). Then it installs the
 latest Embody Mode firmware, adds the robot to your account, writes every app you ticked with a
@@ -49,10 +55,13 @@ minutes. Then:
 - The robot connects to its start app; Next and Connect on its QR screen switch between your
   apps. It is **private**: only you, signed in, see it. Open the app (e.g.
   [raw.sa.w42.eu](https://raw.sa.w42.eu)) on any device where you sign in, and it is there.
-- Without Wi-Fi in step 3, the robot opens a hotspot first ([First start](#first-start)).
-- [sm.w42.eu](https://sm.w42.eu) lists your robots with their apps: make one public (its QR
-  code then pairs anyone), or remove it (its tokens stop working). To change its apps, set it
-  up again (with "Keep the robot's firmware").
+- Without Wi-Fi in step 4, the robot opens a hotspot first ([First start](#first-start)).
+- [sm.w42.eu](https://sm.w42.eu) shows your robot: **Open** its start app, its status (online,
+  on which app), its apps (★ start, × remove, + add: they reach the robot within a few minutes,
+  "✓ On the robot"), a name for it, and in **⋯**: public or private (public: its QR code pairs
+  anyone), history, remove (its tokens stop working).
+- Plugged into the computer again, the robot gets a USB strip on its card: update the firmware,
+  write its apps, change the two permissions.
 
 Everything streams through those servers (a proof of concept, not reviewed), so keep private
 things on your own servers (B).
@@ -84,7 +93,7 @@ from the computer it runs on.
    shared robot token:
 
    ```json
-   [{"id": "raw", "name": "Raw dashboard", "url": "ws://192.168.1.10:8765", "token_file": "/home/me/.config/stackchan-server/robot-token"}]
+   [{"id": "raw", "name": "Raw data", "url": "ws://192.168.1.10:8765", "token_file": "/home/me/.config/stackchan-server/robot-token"}]
    ```
 
    ```bash
@@ -93,15 +102,10 @@ from the computer it runs on.
    go run ./cmd/s-w42-eu-manager
    ```
 
-3. **Set the robot up:** plug it in, open `http://localhost:8790/setup` in Chrome or Edge, tick
-   the apps and press **Set up my robot**. The manager fills in this computer's Wi-Fi and
-   installs the official firmware (it fetches the release from GitHub). Nothing to type.
+3. **Set the robot up:** plug it in, open `http://localhost:8790` in Chrome or Edge, press
+   **Connect** and **Set up** (the apps are ticked). The manager fills in this computer's Wi-Fi
+   and installs the official firmware (it fetches the release from GitHub). Nothing to type.
 
-   - **From another computer:** on the manager's computer, press **Copy setup for another
-     computer** in Options, and paste it on the other computer's setup page (Options → Apps →
-     Setup from your server), e.g. [sm.w42.eu/setup](https://sm.w42.eu/setup) (signed in, to
-     install the firmware there). It holds the robot token and the Wi-Fi password: keep it
-     private.
    - The robot must reach each app's address (`url` in the catalog).
    - Or, on a robot that already has Embody Mode, from a terminal (in s-w42-eu-manager):
      `go run ./cmd/s-w42-eu-usb provision -url ws://192.168.1.10:8765 -token-file ~/.config/stackchan-server/robot-token -default -autostart`,
@@ -115,7 +119,7 @@ from the computer it runs on.
 For changes to the firmware. There is one firmware source; the official release is that
 source built with its release configuration, and everything else a robot needs (server,
 token, Wi-Fi, autostart) is its settings, written over USB. Your own builds are for your own
-robots: flash them from a terminal, as below. The setup page installs only the official
+robots: flash them from a terminal, as below. The manager's page installs only the official
 release.
 
 ### 1. Get the code
@@ -128,7 +132,7 @@ git clone https://github.com/mj41/s-w42-eu-manager.git   # the manager and s-w42
 ### 2. Choose how the robot gets its server
 
 - **Over USB after flashing** (simplest): nothing to configure. Set the robot up afterwards as
-  in A or B, step 3 (the page with "Keep the robot's firmware", or `s-w42-eu-usb`).
+  in A or B (the page with **Install the latest official Embody Mode** unticked, or `s-w42-eu-usb`).
 - **Built in:** create `StackChan/firmware/sdkconfig.defaults.local` (it is gitignored,
   because it holds the token):
 
@@ -195,15 +199,15 @@ Plug the cable into the USB-C port **on the robot's head** (the CoreS3), then:
 
 ### 5. Set it up over USB
 
-Without a built-in server (step 2), set the robot up as in A or B, step 3: the setup page with
-**Keep the robot's firmware**, or `s-w42-eu-usb`.
+Without a built-in server (step 2), set the robot up as in A or B: the page with **Install the
+latest official Embody Mode** unticked, or `s-w42-eu-usb`.
 
 ### The official release
 
 Pushing an `embody-v*` tag makes GitHub build the release: `sdkconfig.defaults` plus
 `sdkconfig.defaults.release` (no server, no token, automation on), never
 `sdkconfig.defaults.local`. It attaches the parts, `manifest.json` with their SHA-256 and one
-merged image to the release. A server's `/setup` installs the latest GitHub release by default
+merged image to the release. A manager's page installs the latest GitHub release by default
 (`-firmware-release latest`); `-firmware-dir` serves those files from a directory instead.
 `./container.sh release` runs the same script, `firmware/release.sh`, locally (into `firmware/build-release/dist`), to
 check it before tagging.
@@ -286,7 +290,7 @@ The robot then accepts three more commands from its server: `automation {"autost
 (restart into another app once). Home in Embody Mode still leaves the robot in the launcher.
 Details: the [Embody Mode README](README.md#configuration).
 
-- **Release firmware (A, B):** built in. The setup page can turn autostart on (**Start Embody
+- **Release firmware (A, B):** built in. The manager's page can turn autostart on (**Start Embody
   Mode when the robot turns on**), so the robot comes back into Embody Mode after a power cycle.
 - **Your own build (C):** off by default. Add `CONFIG_STACKCHAN_EMBODY_AUTOMATION=y` to
   `sdkconfig` (and to `sdkconfig.defaults.local`), build and flash.
@@ -298,12 +302,12 @@ Embody Mode, so use it only with a server you trust.
 
 | Problem | Try |
 |---|---|
-| The setup page offers no device | a data cable (not a charging-only one), in the head's USB-C port; close other programs on the port (`idf.py monitor`, `s-w42-eu-usb`); on Linux, the `dialout` group |
-| The setup page: "The robot did not answer" | press the robot's reset button and try again; with "Keep the robot's firmware", the robot needs firmware with setup over USB (embody-v0.1.0 or newer) |
+| The page offers no device | a data cable (not a charging-only one), in the head's USB-C port; close other programs on the port (`idf.py monitor`, `s-w42-eu-usb`); on Linux, the `dialout` group |
+| The page: "The robot did not answer" | press the robot's reset button and try again; without installing the firmware, the robot needs firmware with setup over USB (embody-v0.1.0 or newer) |
 | Flashing stops halfway | put the robot into flashing mode by hand (hold the reset button until the green LED lights up) and press the button again |
 | The robot stays on "Connecting" | the server URL and token (for built-in ones: in `sdkconfig`, not only in `sdkconfig.defaults.local`), the firewall, the same network |
 | The robot keeps restarting | after 3 crashes in a row it stops opening Embody Mode by itself and stays in the launcher; report the crash (`idf.py monitor` shows it) and restore the original firmware or install again |
-| Embody Mode says "Set up: sm.w42.eu/setup" | release firmware with no server yet: set it up over USB (A or B) |
+| Embody Mode says "Set up: sm.w42.eu" | release firmware with no server yet: set it up over USB (A or B) |
 | Pairing says the code is invalid | scan again: codes are one-time and expire after 5 minutes |
 | The dashboard shows no robot after pairing | open it with the same host as in the QR code |
 | An app says "this robot is private" | sign in with the account that set it up, or make it public on [sm.w42.eu](https://sm.w42.eu) |

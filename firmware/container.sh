@@ -16,7 +16,7 @@ set -euo pipefail
 
 IDF_IMAGE=${IDF_IMAGE:-docker.io/espressif/idf:v5.5.4@sha256:b9f2d6ea1c19e0c9f7959bdb74a9e3c775642f9d0f3b841937c5fa3363db892b}
 ENGINE=${ENGINE:-$(command -v podman || command -v docker || true)}
-BUILD_DIR=build-container
+BUILD_DIR=${BUILD_DIR:-build-container} # BUILD_DIR=build-release ./container.sh flash: the release image
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 if [[ -z $ENGINE ]]; then
