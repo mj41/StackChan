@@ -244,15 +244,18 @@ On the robot:
 
 ## More servers and apps
 
-The robot keeps a **list of servers** and can switch between them:
+The robot keeps a **list of servers** (its apps), set by its managers, and can switch between
+them:
 
 - **On the robot:** open the QR screen (swipe up, **QR**). **Next** shows the next server,
   **Connect** switches to it, **Pin** makes the shown one the default at start.
-- **Over USB:** set the robot up again with another server (A or B); it is added to the list
-  and made the default.
-- **Offered by a server:** run `s-w42-eu-raw` with
-  `-offer Name=ws://host:port,<token file>` and its robots add that server to their list.
-- **From the dashboard:** the "Servers" section adds, removes and switches servers.
+- **More apps** come from the manager's catalog: add an app to your manager's
+  `~/.config/s-w42-eu-manager/apps.json` and set the robot up again (B), or change its apps
+  online on the manager's page (if you allowed that at setup).
+- **Several managers:** each manages only its own apps. A robot set up on sm.w42.eu (A) and on
+  your own manager (B) keeps both, and the QR screen shows them all.
+- **From an app:** an app may suggest switching to another of the robot's apps (in the
+  dashboard: **Apps**, **Switch**); the robot asks on its screen.
 
 Apps that run as servers the robot can switch to:
 
