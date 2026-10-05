@@ -11,6 +11,10 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 version=${1:-$(git -c safe.directory='*' describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)}
 version=${version#embody-}
+# What the robot reports and the manifest says: M5Stack's version it is based on, this fork, the
+# release ("1.5.1-mj41-v0.3.1"; firmwareVersion() in usb_setup.h).
+upstream=$(sed -n 's/^set(PROJECT_VER "\(.*\)")$/\1/p' CMakeLists.txt)
+full="$upstream-mj41-$version"
 # __DATE__ and __TIME__ (e.g. mooncake's banner) from the commit, not the clock: the same
 # source gives the same bytes. ./container.sh passes it in (git sees the repo only outside).
 # safe.directory: in a CI container the checkout belongs to another user. No fallback: a wrong
@@ -36,7 +40,7 @@ while read -r offset file; do
     parts="$parts{\"path\":\"$(basename "$file")\",\"offset\":$((offset)),\"sha256\":\"$(sha256sum "build-release/$file" | cut -d' ' -f1)\"},"
 done < <(tail -n +2 build-release/flash_args)
 printf '{"name":"Stackchan Embody Mode","version":"%s","chipFamily":"ESP32-S3","parts":[%s]}\n' \
-    "$version" "${parts%,}" > "$dist/manifest.json"
+    "$full" "${parts%,}" > "$dist/manifest.json"
 (cd "$dist" && sha256sum -- * > SHA256SUMS)
 echo "$dist: $(ls "$dist" | tr '\n' ' ')"
 cat "$dist/manifest.json"

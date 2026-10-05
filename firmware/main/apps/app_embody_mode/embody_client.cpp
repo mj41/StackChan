@@ -182,8 +182,8 @@ void Client::connect()
     if (_config.e2e) {
         body["labels"]["e2e"] = "1";
     }
-    if (_config.appsVersion > 0) {
-        body["labels"]["apps_ver"] = std::to_string(_config.appsVersion);
+    if (!_config.appsVersions.empty()) {
+        body["labels"]["apps_ver"] = _config.appsVersions;
     }
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
@@ -373,12 +373,18 @@ void Client::sendTelemetry(const Telemetry& t)
     send_report(doc);
 }
 
-void Client::sendAppsVersion(int32_t version)
+void Client::sendAppsVersion(const std::string& versions)
 {
     if (_state != State::Registered) {
         return;
     }
-    send("{\"kind\":\"AppsVersion\",\"meta\":{},\"body\":{\"version\":" + std::to_string(version) + "}}");
+    ArduinoJson::JsonDocument doc;
+    doc["kind"] = "AppsVersion";
+    doc["meta"].to<ArduinoJson::JsonObject>();
+    doc["body"]["versions"] = versions;
+    std::string frame;
+    ArduinoJson::serializeJson(doc, frame);
+    send(frame);
 }
 
 void Client::sendEvent(const std::string& name, const Telemetry& data, const Texts& text)

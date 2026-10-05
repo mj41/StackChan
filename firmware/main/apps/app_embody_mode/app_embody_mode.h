@@ -90,6 +90,7 @@ private:
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
     bool _qr_back_to_app      = false;  // Connect on the QR screen: its face once connected
+    std::atomic<bool> _reset_app_look{false};  // another app now: the last one's sprites, picture, LEDs go
     bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;

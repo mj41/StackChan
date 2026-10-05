@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "usb_setup.h"
+#include "managers.h"
 #include "automation.h"
 #include "confirm_dialog.h"
 #include <hal/hal.h>
@@ -115,9 +116,9 @@ static bool save_server(const std::string& name, const std::string& url, const s
     return true;
 }
 
-// A manager's setup over USB: the robot's apps are exactly keep; every other stored server goes
-// (earlier setups, other managers, tests), so the QR screen shows only the apps chosen now.
-static void prune_managed(const std::vector<std::string>& keep)
+// A manager's setup over USB: its apps (origin) are exactly keep. Servers no manager owns go too
+// (earlier setups, tests): the QR screen shows the managers' apps. Other managers' apps stay.
+static void prune_managed(const std::string& origin, const std::vector<std::string>& keep)
 {
     Settings settings("embody", true);
     ArduinoJson::JsonDocument doc;
@@ -128,7 +129,9 @@ static void prune_managed(const std::vector<std::string>& keep)
     auto arr = out.to<ArduinoJson::JsonArray>();
     for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
         const std::string url = o["url"] | "";
-        if (std::find(keep.begin(), keep.end(), url) != keep.end()) {
+        const std::string from = o["origin"] | "";
+        const bool kept = std::find(keep.begin(), keep.end(), url) != keep.end();
+        if (from == origin ? kept : from.rfind("manager:", 0) == 0) {
             arr.add(o);
         }
     }
@@ -230,6 +233,24 @@ static bool screenshot(ArduinoJson::JsonDocument& res)
 }
 #endif
 
+// The managers this robot was set up by (managers.h), for hello and status (no keys).
+static void add_managers(ArduinoJson::JsonDocument& res)
+{
+    const auto list = embody::loadManagers();
+    if (list.empty()) {
+        return;
+    }
+    auto arr = res["managers"].to<ArduinoJson::JsonArray>();
+    for (const auto& m : list) {
+        auto o           = arr.add<ArduinoJson::JsonObject>();
+        o["id"]          = m.id;
+        o["name"]        = m.name;
+        o["version"]     = m.version;
+        o["remote_apps"] = m.remote;
+        o["ask_pin"]     = m.askPin;
+    }
+}
+
 static void handle(const std::string& json)
 {
     ArduinoJson::JsonDocument req;
@@ -240,16 +261,7 @@ static void handle(const std::string& json)
     ArduinoJson::JsonDocument res;
     if (op == "hello") {
         res["ok"]         = true;
-        {
-            Settings settings("embody", false);
-            if (const std::string key = settings.GetString("mgr_key", ""); !key.empty()) {
-                auto m           = res["manager"].to<ArduinoJson::JsonObject>();
-                m["key"]         = key;
-                m["version"]     = settings.GetInt("mgr_ver", 0);
-                m["remote_apps"] = settings.GetBool("mgr_remote", false);
-                m["ask_pin"]     = settings.GetBool("pin_ask", true);
-            }
-        }
+        add_managers(res);
         std::string id = "stackchan-" + GetHAL().getFactoryMacString();  // as Embody Mode: lowercase
         std::transform(id.begin(), id.end(), id.begin(), [](unsigned char c) { return std::tolower(c); });
         res["id"]         = id;
@@ -337,35 +349,47 @@ static void handle(const std::string& json)
             mclog::tagInfo(_tag, "server {} saved{}", std::string(req["server"]["url"] | ""),
                            (req["default"] | false) ? " as the default" : "");
         }
-        // A manager's setup: its key (it signs the robot's app list when the owner changes it on the
-        // manager: ManagedApps), the list's version, and the owner's two choices. Only over USB.
+        // A manager's setup: its key (it signs this robot's app lists later: ManagedApps), its name,
+        // the list's version and the owner's two choices. Only over USB. A robot may have several
+        // managers (a home's own, sm.w42.eu): each one's apps are its own ("manager:<id>").
         const bool managed = req["manager"].is<ArduinoJson::JsonObject>();
+        std::string origin = "added";
         if (managed) {
             const std::string key = req["manager"]["key"] | "";
-            if (key.empty() || key.size() > 256) {
+            const std::string id  = embody::managerId(key);
+            if (id.empty() || key.size() > 256) {
                 return reply_error("manager.key: the manager's public key (base64 DER)");
             }
-            Settings settings("embody", true);
-            settings.SetString("mgr_key", key);
-            settings.SetInt("mgr_ver", req["manager"]["version"] | 0);
-            settings.SetBool("mgr_remote", req["manager"]["remote_apps"] | true);
-            settings.SetBool("pin_ask", req["manager"]["ask_pin"] | true);
+            auto list = embody::loadManagers();
+            auto it   = std::find_if(list.begin(), list.end(), [&](const embody::Manager& m) { return m.id == id; });
+            if (it == list.end()) {
+                list.push_back({});
+                it = list.end() - 1;
+            }
+            it->id      = id;
+            it->key     = key;
+            it->name    = req["manager"]["name"] | it->name.c_str();
+            it->version = req["manager"]["version"] | 0;
+            it->remote  = req["manager"]["remote_apps"] | true;
+            it->askPin  = req["manager"]["ask_pin"] | true;
+            embody::saveManagers(list);
+            origin = embody::managerOrigin(id);
             applied.add("manager");
-            mclog::tagInfo(_tag, "manager key saved; remote app changes {}", (req["manager"]["remote_apps"] | true) ? "allowed" : "off");
+            mclog::tagInfo(_tag, "manager {} ({}) saved; remote app changes {}", id, it->name, it->remote ? "allowed" : "off");
         }
         // More servers (apps) at once; "pin" makes one of them the default at start. From a
-        // manager they are the robot's apps: they replace every stored server.
+        // manager they are its apps: they replace the ones it set before (other managers' stay).
         if (req["servers"].is<ArduinoJson::JsonArray>()) {
             std::vector<std::string> urls;
             for (ArduinoJson::JsonObject o : req["servers"].as<ArduinoJson::JsonArray>()) {
-                if (!save_server(o["name"] | "", o["url"] | "", o["token"] | "", false, managed ? "manager" : "added")) {
+                if (!save_server(o["name"] | "", o["url"] | "", o["token"] | "", false, origin.c_str())) {
                     return reply_error("server url must start with ws:// or wss://");
                 }
                 urls.push_back(o["url"] | "");
                 mclog::tagInfo(_tag, "server {} saved", std::string(o["url"] | ""));
             }
             if (managed) {
-                prune_managed(urls);
+                prune_managed(origin, urls);
             }
             applied.add("servers");
         }
@@ -403,13 +427,7 @@ static void handle(const std::string& json)
         } else {
             res["embody"] = nullptr;  // Embody Mode is not running
         }
-        Settings settings("embody", false);
-        if (!settings.GetString("mgr_key", "").empty()) {
-            auto m           = res["manager"].to<ArduinoJson::JsonObject>();
-            m["version"]     = settings.GetInt("mgr_ver", 0);
-            m["remote_apps"] = settings.GetBool("mgr_remote", false);
-            m["ask_pin"]     = settings.GetBool("pin_ask", true);
-        }
+        add_managers(res);
         return reply(res);
     }
     if (op == "pair") {  // the link on the screen: physical access, like reading the QR code

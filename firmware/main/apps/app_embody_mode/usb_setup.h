@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: MIT
  */
 #pragma once
-#include <esp_app_desc.h>
 
 #include <string>
 
@@ -22,16 +21,18 @@ namespace embody {
  *   {"op":"provision","server":{"name","url","token"},"default":true,"autostart":true,
  *    "wifi":{"ssid","password"},"original":{...}}  -> {"ok":true,"applied":[...]}
  *   "servers":[{"name","url","token"},...] adds more at once; "pin":"<url>" makes it the default
- *   "manager":{"key","version","remote_apps","ask_pin"}: set up by a Stackchan manager: its
- *   public key (base64 DER, P-256), the app list's version, whether the manager may change the
- *   apps later (ManagedApps, signed with that key; default true), and whether a new start app
- *   from it is asked on the screen (default true). Its "servers" replace every stored server.
- *   Only over USB; hello returns them ("manager", without them: never set up by a manager).
+ *   "manager":{"key","name","version","remote_apps","ask_pin"}: set up by a Stackchan manager: its
+ *   public key (base64 DER, P-256; its id: the first 12 hex of the key's SHA-256), its name, the app
+ *   list's version, whether it may change its apps later (ManagedApps, signed with that key; default
+ *   true), and whether a new start app from it is asked on the screen (default true). A robot may
+ *   have several managers (managers.h): its "servers" replace that manager's apps only, and servers
+ *   no manager owns go. Only over USB; hello and status return "managers" (without keys).
  *   {"op":"restart"}                     -> {"ok":true}, then a restart into Embody Mode
  *   {"op":"pair"}                        -> {"ok":true,"url"}: the pairing link on the robot's screen
  *   {"op":"status"}                      -> {"ok":true,"embody":{server, name, state, status, qr, shown,
  *                                            default, question, servers:[{name, url, origin}]}|null,
- *                                            "manager":{...}?}: read-only, no tokens
+ *                                            "managers":[{id, name, version, remote_apps, ask_pin}]?}:
+ *                                            read-only, no tokens
  * "original": the firmware the robot had before its first setup (the setup page reads its
  *   identity and saves a backup); stored once (NVS embody/orig_fw), never replaced.
  * "previous": the firmware it had before the latest setup with a backup (NVS embody/prev_fw),
@@ -55,15 +56,16 @@ void setPairUrl(const std::string& url);
 void setStatus(const std::string& json);
 
 /**
- * @brief The firmware's version as the robot reports it (USB hello, Register): the Embody Mode
- *        release ("v0.3.0", from release.sh), or the project's version in an own build.
+ * @brief The firmware's version as the robot reports it (USB hello, Register): M5Stack's version
+ *        it is based on, "mj41" (this fork), and the Embody Mode release from release.sh
+ *        ("1.5.1-mj41-v0.3.1"), or "-dev" in an own build. The release's manifest.json says the same.
  */
 inline const char* firmwareVersion()
 {
 #ifdef EMBODY_VERSION
-    return EMBODY_VERSION;
+    return FIRMWARE_VERSION "-mj41-" EMBODY_VERSION;
 #else
-    return esp_app_get_description()->version;
+    return FIRMWARE_VERSION "-mj41-dev";
 #endif
 }
 

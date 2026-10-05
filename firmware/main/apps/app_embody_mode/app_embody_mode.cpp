@@ -7,6 +7,7 @@
 #include <mbedtls/sha256.h>
 #include <mbedtls/pk.h>
 #include "app_embody_mode.h"
+#include "managers.h"
 #include <apps/common/common.h>
 #include <apps/common/loading_page/loading_page.h>
 #include <assets/assets.h>
@@ -403,6 +404,20 @@ void AppEmbodyMode::onRunning()
     }
     _pending_commands.clear();
 
+    if (_reset_app_look.exchange(false)) {  // under the LVGL lock: a new app starts with the robot's face
+        _sprite_layer.clear();
+        _picture_asset.clear();
+        lv_obj_add_flag(_picture_obj, LV_OBJ_FLAG_HIDDEN);
+        lv_image_set_src(_picture_obj, nullptr);
+        _picture.reset();
+        if (GetStackChan().hasAvatar()) {
+            GetStackChan().avatar().setEmotion(avatar::Emotion::Neutral);
+        }
+        ArduinoJson::JsonDocument off;
+        off["left"]  = "#000000";
+        off["right"] = "#000000";
+        run_leds(off);
+    }
     if (_pending_picture) {
         _picture = std::move(_pending_picture);  // keep the pixels alive while shown
         lv_image_set_src(_picture_obj, _picture->image_dsc());
@@ -2454,70 +2469,51 @@ void AppEmbodyMode::merge_offers(const std::string& serversJson)
     announce_servers();
 }
 
-// The manager's signature on a ManagedApps payload: ECDSA P-256 over SHA-256, with its key from the
-// USB setup (base64 DER, SubjectPublicKeyInfo).
-static bool b64decode(const std::string& in, std::string& out)
-{
-    size_t olen = 0;
-    out.resize(in.size());
-    if (mbedtls_base64_decode((unsigned char*)out.data(), out.size(), &olen, (const unsigned char*)in.data(), in.size()) != 0) {
-        return false;
-    }
-    out.resize(olen);
-    return true;
-}
-
-static bool manager_signed(const std::string& keyB64, const std::string& payload, const std::string& sigB64)
-{
-    std::string key, sig;
-    if (!b64decode(keyB64, key) || !b64decode(sigB64, sig) || sig.empty()) {
-        return false;
-    }
-    unsigned char hash[32];
-    mbedtls_pk_context pk;
-    mbedtls_pk_init(&pk);
-    const bool ok = mbedtls_pk_parse_public_key(&pk, (const unsigned char*)key.data(), key.size()) == 0 &&
-                    mbedtls_pk_can_do(&pk, MBEDTLS_PK_ECDSA) &&
-                    mbedtls_sha256((const unsigned char*)payload.data(), payload.size(), hash, 0) == 0 &&
-                    mbedtls_pk_verify(&pk, MBEDTLS_MD_SHA256, hash, sizeof hash, (const unsigned char*)sig.data(),
-                                      sig.size()) == 0;
-    mbedtls_pk_free(&pk);
-    return ok;
-}
-
-// The robot's apps as its manager set them (ManagedApps, relayed by the server it is on). Only
-// when the owner allowed it at the USB setup, signed by the manager's key from that setup, for
-// this robot and newer than the last. The apps the manager put here ("manager") are replaced:
-// new ones come with their token, kept ones keep theirs, removed ones go. Apps added another way
-// stay. A new start app is asked on the screen unless the setup said not to ask.
+// The robot's apps as one of its managers set them (ManagedApps, relayed by the server it is on;
+// managers.h). Only from a manager it was set up by over USB that may change its apps, signed with
+// that manager's key, for this robot and newer than its last list. That manager's apps
+// ("manager:<id>") are replaced: new ones come with their token, kept ones keep theirs, removed ones
+// go. Other managers' apps and apps added another way stay. A new start app is asked on the screen
+// unless that manager's setup said not to ask.
 void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::string& sig)
 {
-    Settings settings("embody", false);
-    const std::string key = settings.GetString("mgr_key", "");
-    auto refuse           = [this](const char* reason) {
+    auto refuse = [this](const char* reason) {
         queue_event("apps_refused", {}, {{"reason", reason}});
         mclog::tagInfo(_tag, "managed apps refused: {}", reason);
     };
-    if (key.empty() || !settings.GetBool("mgr_remote", false)) {
-        return refuse("not allowed at the USB setup");
-    }
     std::string payload;
-    if (!b64decode(payloadB64, payload) || !manager_signed(key, payload, sig)) {
-        return refuse("not signed by this robot's manager");
+    {
+        size_t olen = 0;
+        payload.resize(payloadB64.size());
+        if (mbedtls_base64_decode((unsigned char*)payload.data(), payload.size(), &olen,
+                                  (const unsigned char*)payloadB64.data(), payloadB64.size()) != 0) {
+            return refuse("not base64");
+        }
+        payload.resize(olen);
     }
     ArduinoJson::JsonDocument doc;
     if (ArduinoJson::deserializeJson(doc, payload) || std::string(doc["robot"] | "") != _robot_id) {
         return refuse("not for this robot");
     }
+    auto managers = embody::loadManagers();
+    const std::string id = doc["manager"] | "";
+    auto m = std::find_if(managers.begin(), managers.end(), [&](const embody::Manager& x) { return x.id == id; });
+    if (m == managers.end() || !m->remote) {
+        return refuse("not from a manager allowed at the USB setup");
+    }
+    if (!embody::managerSigned(m->key, payload, sig)) {
+        return refuse("not signed by that manager");
+    }
     const int32_t version = doc["version"] | 0;
-    if (version <= settings.GetInt("mgr_ver", 0)) {
+    if (version <= m->version) {
         return;  // had it already: every connection brings it
     }
+    const std::string origin  = embody::managerOrigin(id);
     const std::string current = _servers[_server_index].url;
     const std::string shown   = _servers[_shown_index].url;
     std::vector<ServerEntry> next;
     for (const auto& e : _servers) {
-        if (e.origin != "manager") {
+        if (e.origin != origin) {
             next.push_back(e);
         }
     }
@@ -2535,13 +2531,12 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
             continue;
         }
         next.erase(std::remove_if(next.begin(), next.end(), [&](const ServerEntry& e) { return e.url == url; }), next.end());
-        next.push_back({o["name"] | host_of(url).c_str(), url, token, "manager"});
+        next.push_back({o["name"] | host_of(url).c_str(), url, token, origin});
     }
-    _servers = next;
-    {
-        Settings rw("embody", true);
-        rw.SetInt("mgr_ver", version);
-    }
+    _servers   = next;
+    m->version = version;
+    const bool askPin = m->askPin;
+    embody::saveManagers(managers);
     const int cur  = find_server(current);
     const int show = find_server(shown);
     _server_index  = cur < 0 ? 0 : cur;
@@ -2552,13 +2547,13 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     }
     save_servers();
     announce_servers();
-    queue_event("apps_updated", {{"version", (double)version}});
+    queue_event("apps_updated", {{"version", (double)version}}, {{"manager", id}});
     if (_client) {
-        _client->sendAppsVersion(version);  // for the manager, also when the server's traffic is sealed
+        _client->sendAppsVersion(embody::appsVersions(managers));  // for the managers, also when the traffic is sealed
     }
-    mclog::tagInfo(_tag, "managed apps: version {}, {} servers", version, _servers.size());
+    mclog::tagInfo(_tag, "managed apps from {}: version {}, {} servers", id, version, _servers.size());
     if (const int p = find_server(pin); p >= 0 && pin != _default_url) {
-        if (settings.GetBool("pin_ask", true)) {
+        if (askPin) {
             request_server_change(p, true);  // asked on the robot's screen
         } else {
             _default_url = pin;
@@ -2718,7 +2713,7 @@ void AppEmbodyMode::connect_server(size_t index)
         .commands  = _commands,
         .measurements = measurements,
         .e2e          = _e2e_ok && is_e2e(_servers[index].url) ? &_e2e : nullptr,
-        .appsVersion  = Settings("embody", false).GetInt("mgr_ver", 0),
+        .appsVersions = embody::appsVersions(embody::loadManagers()),
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
@@ -2782,6 +2777,7 @@ void AppEmbodyMode::connect_server(size_t index)
     _client->onServerOffer = [this](const std::string& offers) { merge_offers(offers); };
     _client->onManagedApps = [this](const std::string& payload, const std::string& sig) { apply_managed(payload, sig); };
     _servers_announced = false;  // tell the new server the list once registered
+    _reset_app_look    = true;   // what the last app drew (its face, a picture, LEDs) is not this one's
 }
 
 /* ---------------------------------- IR ------------------------------------ */

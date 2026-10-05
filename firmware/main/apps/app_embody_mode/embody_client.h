@@ -42,9 +42,9 @@ public:
         std::vector<std::string> measurements;
         // End-to-end encryption for this server (e2e.h; nullptr: plaintext). Owned by the app.
         E2E* e2e = nullptr;
-        // The version of the app list its manager set (ManagedApps; 0: none): label "apps_ver",
-        // so the manager can tell the owner the robot has the latest list.
-        int32_t appsVersion = 0;
+        // The versions of the app lists its managers set ("id:version,…", managers.h; "": none):
+        // label "apps_ver", so each manager can tell the owner the robot has its latest list.
+        std::string appsVersions;
     };
 
     using Telemetry = std::vector<std::pair<std::string, double>>;  // double: Unix times need it
@@ -113,9 +113,9 @@ public:
     // numeric data such as {x, y} and text data such as {uid}. Dropped while offline.
     void sendEvent(const std::string& name, const Telemetry& data = {}, const Texts& text = {});
 
-    // The version of the app list the robot has now (after a ManagedApps): never sealed (e2e),
-    // it is for the server and the manager, who know the list anyway.
-    void sendAppsVersion(int32_t version);
+    // The versions of the app lists the robot has now, one per manager ("id:version,…", after a
+    // ManagedApps): never sealed (e2e), it is for the servers and managers, who know the lists anyway.
+    void sendAppsVersion(const std::string& versions);
 
     // Send telemetry now, besides the periodic collectTelemetry (e.g. a car's sensors). Main loop only.
     void sendTelemetry(const Telemetry& t);
