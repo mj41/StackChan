@@ -5,6 +5,7 @@
  */
 #pragma once
 
+#include <functional>
 #include <string>
 
 namespace embody {
@@ -54,6 +55,19 @@ void setPairUrl(const std::string& url);
  * @brief What Embody Mode is doing, as JSON, for {"op":"status"} (tests, tools): set from its loop.
  */
 void setStatus(const std::string& json);
+
+/**
+ * @brief The manager changed (a USB setup): the channel connects to the new one
+ *        (manager_channel.h). Embody Mode sets the hook; the USB task calls it.
+ */
+void onManagerChanged(std::function<void()> fn);
+void managerChanged();
+
+/**
+ * @brief Automation (tests): the app loop stops for this many seconds, as if it hung; the manager
+ *        channel then reports it stuck. 0: none pending. Embody Mode takes it in its loop.
+ */
+int takeStall();
 
 /**
  * @brief The firmware's version as the robot reports it (USB hello, Register): M5Stack's version

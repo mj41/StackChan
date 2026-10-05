@@ -219,7 +219,7 @@ void AppEmbodyMode::onOpen()
     commands.push_back("asset_delete");
     commands.push_back("servo_power");
     commands.push_back("rotate");
-    // The robot's apps are its managers' to change (managers.h), never an app's: an app may only
+    // The robot's apps are its manager's to change (managers.h), never an app's: an app may only
     // suggest a switch (asked on the screen) and set its own end-to-end encryption.
     for (const char* c : {"server_switch", "server_e2e", "e2e_forget"}) {
         commands.push_back(c);
@@ -243,6 +243,8 @@ void AppEmbodyMode::onOpen()
     _e2e_ok = _e2e.begin(_robot_id);
     load_e2e_urls();
     load_servers();
+    _channel.start(_robot_id);  // to its manager, apart from the apps (manager_channel.h)
+    embody::onManagerChanged([this]() { _channel.reconnect(); });
     if (!_default_url.empty()) {
         connect_server(_server_index);
     }  // else: the QR screen is a chooser (Next, Connect); nothing is contacted until then
@@ -295,6 +297,9 @@ void AppEmbodyMode::onOpen()
 
 void AppEmbodyMode::onRunning()
 {
+    if (const int stall = embody::takeStall(); stall > 0) {  // automation: as if the loop hung
+        vTaskDelay(pdMS_TO_TICKS(stall * 1000));
+    }
     // Server switching: from the QR screen buttons or the server_switch command
     if (const int nav = _nav_request.exchange(0); nav && !_servers.empty()) {
         if (nav == 2) {  // Pin: make the shown server the default, or clear it if it is already
@@ -312,6 +317,12 @@ void AppEmbodyMode::onRunning()
                 _qr_back_to_app = true;  // back to the app's face once connected (its QR: the QR button)
                 mclog::tagInfo(_tag, "qr: connect to {}", _servers[_shown_index].url);
             }
+        } else if (nav == 4) {  // the gear: the Manager screen
+            _mgr_show = true;
+        } else if (nav == 5) {  // its Back
+            _mgr_show = false;
+        } else if (nav == 6) {  // its "Use <the second manager>"
+            _mgr_use_second = true;
         } else if (_servers.size() > 1) {  // Next: only browse, the connection stays
             // The release's empty "Set up: sm.w42.eu" entry only while there is nothing else.
             for (size_t i = 0; i < _servers.size(); i++) {
@@ -402,10 +413,10 @@ void AppEmbodyMode::onRunning()
 
     prepare_pictures();  // decode stored pictures before taking the LVGL lock
     LvglLockGuard lock;
-    for (const auto& [payload, sig] : _pending_managed) {
-        apply_managed(payload, sig);
+    for (embody::ManagerChannel::Message msg; _channel.pop(msg);) {  // from the manager, checked
+        apply_signed(msg.kind, msg.payload);
+        _servers_rev++;
     }
-    _pending_managed.clear();
     if (_reset_app_look.exchange(false)) {  // under the LVGL lock: before the new app's commands
         reset_for_app();
     }
@@ -464,6 +475,8 @@ void AppEmbodyMode::onRunning()
         embody::setPairUrl(pair);
     }
     publish_status(now);
+    publish_manager_state(now);
+    _channel.beat();
     // Wi-Fi modem sleep makes every packet to the robot wait for the next beacon (up to about
     // 100 ms): off for 2 minutes after the last command and while the camera or microphone
     // streams, on otherwise (it saves battery). The first command after a quiet spell is slow.
@@ -483,6 +496,7 @@ void AppEmbodyMode::onRunning()
         embody::mark_stable();
     }
     render_server_row();
+    update_manager_screen();
     update_motion();
     update_hold();
     if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
@@ -739,12 +753,13 @@ void AppEmbodyMode::create_view()
     _server_pos->setWidth(160);
     lv_obj_set_style_text_align(_server_pos->get(), LV_TEXT_ALIGN_CENTER, 0);
     _server_pos->align(LV_ALIGN_TOP_LEFT, 62, 28);
-    const char* labels[3] = {"Pin", "Next " LV_SYMBOL_RIGHT, "Back to app"};
-    const int xs[3]        = {6, 226, 182};
-    const int ys[3]        = {4, 4, 172};  // close (or connect): bottom right, above the home swipe zone
-    const int ws[3]        = {50, 88, 132};
-    const int actions[3]   = {2, 1, 3};
-    for (int i = 0; i < 3; i++) {
+    // The gear opens the Manager screen (update_manager_screen).
+    const char* labels[4] = {"Pin", "Next " LV_SYMBOL_RIGHT, "Back to app", LV_SYMBOL_SETTINGS};
+    const int xs[4]        = {6, 226, 226, 178};
+    const int ys[4]        = {4, 4, 172, 172};  // close (or connect): bottom right, above the home swipe zone
+    const int ws[4]        = {50, 88, 88, 44};
+    const int actions[4]   = {2, 1, 3, 4};
+    for (int i = 0; i < 4; i++) {
         lv_obj_t* b = lv_button_create(_panel->get());
         lv_obj_set_size(b, ws[i], 44);
         lv_obj_set_pos(b, xs[i], ys[i]);
@@ -2039,6 +2054,7 @@ void AppEmbodyMode::request_server_change(int index, bool makeDefault, const std
     const auto& e       = _servers[index];
     _server_ask_url     = e.url;
     _server_ask_default = makeDefault;
+    _switch_answer.clear();
     _server_answer      = std::make_shared<std::atomic<int>>(0);
     embody::askOnScreen(makeDefault ? "Start with " + e.name + "?" : "Connect to " + e.name + "?",
                         host_of(e.url) + "\nasked by " + by +
@@ -2059,8 +2075,10 @@ void AppEmbodyMode::update_server_question()
     if (!yes || i < 0) {
         queue_event("server_refused", {}, {{"server", _server_ask_url}, {"reason", "not confirmed on the robot"}});
         mclog::tagInfo(_tag, "server change not confirmed on the robot");
+        _switch_answer = "not confirmed";  // for the manager (publish_manager_state)
         return;
     }
+    _switch_answer = "switched";
     if (_server_ask_default) {
         _default_url = _servers[i].url;
         save_servers();
@@ -2394,51 +2412,62 @@ int AppEmbodyMode::find_server(const std::string& key)
     return -1;
 }
 
-// The robot's apps as one of its managers set them (ManagedApps, relayed by the server it is on;
-// managers.h). Only from a manager it was set up by over USB that may change its apps, signed with
-// that manager's key, for this robot and newer than its last list. That manager's apps
-// ("manager:<id>") are replaced: new ones come with their token, kept ones keep theirs, removed ones
-// go. Other managers' apps and apps added another way stay. A new start app is asked on the screen
-// unless that manager's setup said not to ask.
-void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::string& sig)
+// A message from the robot's primary manager, already checked by the channel (manager_channel.h:
+// its key, this robot, a newer seq). Under the LVGL lock: it may ask on the screen.
+//  - Apps: the robot's apps are replaced: new ones come with their token, kept ones keep theirs,
+//    removed ones go (the built-in "Set up" entry stays). A new start app is asked on the screen
+//    unless the setup said not to ask.
+//  - Switch {app}: to one of its apps (by appId), asked on the screen likewise.
+//  - Forget {browsers}: those end-to-end browsers are forgotten (a new group key).
+void AppEmbodyMode::apply_signed(const std::string& kind, const std::string& payload)
 {
-    auto refuse = [this](const char* reason) {
-        queue_event("apps_refused", {}, {{"reason", reason}});
-        mclog::tagInfo(_tag, "managed apps refused: {}", reason);
-    };
-    std::string payload;
-    {
-        size_t olen = 0;
-        payload.resize(payloadB64.size());
-        if (mbedtls_base64_decode((unsigned char*)payload.data(), payload.size(), &olen,
-                                  (const unsigned char*)payloadB64.data(), payloadB64.size()) != 0) {
-            return refuse("not base64");
-        }
-        payload.resize(olen);
-    }
     ArduinoJson::JsonDocument doc;
-    if (ArduinoJson::deserializeJson(doc, payload) || std::string(doc["robot"] | "") != _robot_id) {
-        return refuse("not for this robot");
+    if (ArduinoJson::deserializeJson(doc, payload)) {
+        return;
     }
-    auto managers = embody::loadManagers();
-    const std::string id = doc["manager"] | "";
-    auto m = std::find_if(managers.begin(), managers.end(), [&](const embody::Manager& x) { return x.id == id; });
-    if (m == managers.end() || !m->remote) {
-        return refuse("not from a manager allowed at the USB setup");
+    const embody::Manager m = embody::loadManager("manager");
+    const std::string by    = m.name.empty() ? "its manager" : m.name;
+    if (kind == "Forget") {
+        int forgotten = 0;
+        for (ArduinoJson::JsonVariant b : doc["browsers"].as<ArduinoJson::JsonArray>()) {
+            forgotten += _e2e.forget(b | "") ? 1 : 0;
+        }
+        if (forgotten > 0) {
+            queue_event("e2e_forgotten", {{"browsers", (double)forgotten}});
+        }
+        return;
     }
-    if (!embody::managerSigned(m->key, payload, sig)) {
-        return refuse("not signed by that manager");
+    if (kind == "Switch") {
+        const std::string app = doc["app"] | "";
+        int s                 = -1;
+        for (size_t i = 0; i < _servers.size(); i++) {
+            if (!_servers[i].url.empty() && embody::appId(_servers[i].url) == app) {
+                s = (int)i;
+            }
+        }
+        if (s < 0) {
+            _switch_answer = "refused: no such app";
+        } else if ((size_t)s == _server_index) {
+            _switch_answer = "switched";  // there already
+        } else if (_server_answer) {
+            _switch_answer = "refused: another question is on the screen";
+        } else if (m.askPin) {
+            request_server_change(s, false, by);
+        } else {
+            _pending_switch = s;
+            _switch_answer  = "switched";
+        }
+        mclog::tagInfo(_tag, "switch from {}: {}", by, _switch_answer.empty() ? "asking" : _switch_answer);
+        return;
     }
-    const int32_t version = doc["version"] | 0;
-    if (version <= m->version) {
-        return;  // had it already: every connection brings it
+    if (kind != "Apps") {
+        return;
     }
-    const std::string origin  = embody::managerOrigin(id);
     const std::string current = _servers[_server_index].url;
     const std::string shown   = _servers[_shown_index].url;
     std::vector<ServerEntry> next;
     for (const auto& e : _servers) {
-        if (e.origin != origin) {
+        if (e.origin == "built-in") {
             next.push_back(e);
         }
     }
@@ -2452,33 +2481,24 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
             token = _servers[i].token;  // kept: the manager has only its hash
         }
         if (token.empty()) {
-            mclog::tagInfo(_tag, "managed app {} without a token: skipped", url);
+            mclog::tagInfo(_tag, "app {} without a token: skipped", url);
             continue;
         }
         next.erase(std::remove_if(next.begin(), next.end(), [&](const ServerEntry& e) { return e.url == url; }), next.end());
-        next.push_back({o["name"] | host_of(url).c_str(), url, token, origin});
+        next.push_back({o["name"] | host_of(url).c_str(), url, token, "manager"});
     }
-    // Browsers removed in the manager: they can no longer read the robot (a new group key).
-    if (doc["forget_all"] | false) {
-        _e2e.forgetAll();
-        queue_event("e2e_forgotten");
-    } else {
-        int forgotten = 0;
-        for (ArduinoJson::JsonVariant b : doc["forget"].as<ArduinoJson::JsonArray>()) {
-            forgotten += _e2e.forget(b | "") ? 1 : 0;
+    if (next.empty()) {
+        return;
+    }
+    _servers                = next;
+    const int32_t version   = doc["version"] | 0;
+    const std::string mname = doc["name"] | "";
+    embody::updateManager("manager", [&](embody::Manager& cur) {
+        cur.version = version;
+        if (!mname.empty() && mname.size() <= 64) {
+            cur.name = mname;  // the manager's name may change
         }
-        if (forgotten > 0) {
-            queue_event("e2e_forgotten", {{"browsers", (double)forgotten}});
-        }
-    }
-    _servers   = next;
-    m->version = version;
-    if (const std::string name = doc["name"] | ""; !name.empty() && name.size() <= 64) {
-        m->name = name;  // the manager's name may change
-    }
-    const bool askPin       = m->askPin;
-    const std::string mname = m->name.empty() ? "its manager" : m->name;
-    embody::saveManagers(managers);
+    });
     const int cur  = find_server(current);
     const int show = find_server(shown);
     _server_index  = cur < 0 ? 0 : cur;
@@ -2489,14 +2509,11 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     }
     save_servers();
     announce_servers();
-    queue_event("apps_updated", {{"version", (double)version}}, {{"manager", id}});
-    if (_client) {
-        _client->sendAppsVersion(embody::appsVersions(managers));  // for the managers, also when the traffic is sealed
-    }
-    mclog::tagInfo(_tag, "managed apps from {}: version {}, {} servers", id, version, _servers.size());
+    queue_event("apps_updated", {{"version", (double)version}});
+    mclog::tagInfo(_tag, "apps from {}: version {}, {} servers", by, version, _servers.size());
     if (const int p = find_server(pin); p >= 0 && pin != _default_url) {
-        if (askPin) {
-            request_server_change(p, true, mname);  // asked on the robot's screen
+        if (m.askPin) {
+            request_server_change(p, true, by);  // asked on the robot's screen
         } else {
             _default_url = pin;
             save_servers();
@@ -2507,15 +2524,50 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
         const int def   = find_server(_default_url);
         _pending_switch = def < 0 ? 0 : def;
     }
-    // "switch": the owner opened one of its apps on the manager's page: go there now (once: this
-    // version only), asked on the screen like a new start app.
-    if (const int s = find_server(doc["switch"] | ""); s > 0 && (size_t)s != _server_index) {
-        if (askPin) {
-            request_server_change(s, false, mname);
-        } else {
-            _pending_switch = s;
-        }
+}
+
+// What the manager channel reports (manager_channel.h): the app it is on, the connection, the
+// question on the screen, the last answer, the app list's version; and its apps (for Hello).
+void AppEmbodyMode::publish_manager_state(uint32_t now)
+{
+    if (now - _mgr_state_at < 250) {
+        return;
     }
+    _mgr_state_at = now;
+    ArduinoJson::JsonDocument doc;
+    static const char* states[] = {"connecting", "registered", "offline", "rejected"};
+    const auto& e    = _servers[_server_index];
+    doc["app"]       = e.url.empty() ? "" : embody::appId(e.url);
+    doc["app_name"]  = e.name;
+    doc["conn"]      = _client ? states[(int)_client->state()] : "none";
+    doc["firmware"]  = embody::firmwareVersion();
+    doc["apps_version"] = embody::loadManager("manager").version;
+    int left               = 0;
+    const std::string text = embody::questionText(&left);
+    if (!text.empty()) {
+        doc["question"]["text"]         = text;
+        doc["question"]["seconds_left"] = left;
+    }
+    if (!_switch_answer.empty()) {
+        doc["answer"] = _switch_answer;
+    }
+    std::string state;
+    ArduinoJson::serializeJson(doc, state);
+    if (_servers_rev != _mgr_apps_rev) {
+        _mgr_apps_rev = _servers_rev;
+        ArduinoJson::JsonDocument apps;
+        auto arr = apps.to<ArduinoJson::JsonArray>();
+        for (const auto& s : _servers) {
+            if (!s.url.empty()) {
+                auto o    = arr.add<ArduinoJson::JsonObject>();
+                o["id"]   = embody::appId(s.url);
+                o["name"] = s.name;
+            }
+        }
+        _mgr_apps.clear();
+        ArduinoJson::serializeJson(apps, _mgr_apps);
+    }
+    _channel.setState(state, _mgr_apps);
 }
 
 // What {"op":"status"} answers over USB (usb_setup.h), for tests and tools: the server it is on and
@@ -2552,7 +2604,7 @@ void AppEmbodyMode::publish_status(uint32_t now)
 }
 
 // An app's name on the screen (QR screen, name card, badge): its own, and when another app has the
-// same name (two managers' "Raw data"), also its manager's name or, without one, its host.
+// same name (two "Raw data" apps: a home's and sm.w42.eu's), also its host.
 std::string AppEmbodyMode::shown_name(size_t index)
 {
     const auto& e = _servers[index];
@@ -2563,15 +2615,7 @@ std::string AppEmbodyMode::shown_name(size_t index)
     if (!twin) {
         return e.name;
     }
-    std::string by = host_of(e.url);
-    if (e.origin.rfind("manager:", 0) == 0) {
-        for (const auto& m : embody::loadManagers()) {
-            if (embody::managerOrigin(m.id) == e.origin && !m.name.empty()) {
-                by = m.name;
-            }
-        }
-    }
-    return e.name + " (" + by + ")";
+    return e.name + " (" + host_of(e.url) + ")";
 }
 
 // The "servers" event: the list without tokens, the current and the default one.
@@ -2630,6 +2674,135 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
     auto* self       = static_cast<AppEmbodyMode*>(lv_event_get_user_data(e));
     const int action = (int)(intptr_t)lv_obj_get_user_data((lv_obj_t*)lv_event_get_target(e));
     self->_nav_request = action;
+}
+
+// The Manager screen (the QR screen's gear): which manager, connected or not, its page's address
+// with a QR code (a phone on the home Wi-Fi opens it), and "Use <the second>" when the USB setup
+// allowed the second manager to become the primary (asked on the screen). LVGL lock held.
+void AppEmbodyMode::update_manager_screen()
+{
+    if (_mgr_use_second.exchange(false) && !_mgr_answer) {
+        const auto second = embody::loadManager("manager2");
+        if (second.valid() && second.mayPrimary) {
+            _mgr_answer = std::make_shared<std::atomic<int>>(0);
+            embody::askOnScreen("Make " + second.name + " this robot's manager?",
+                                "It then sets the robot's apps and may switch them. The other one stays as the second.",
+                                60, [answer = _mgr_answer](bool yes) { *answer = yes ? 1 : -1; });
+        }
+    }
+    if (_mgr_answer && *_mgr_answer != 0) {
+        const bool yes = *_mgr_answer == 1;
+        _mgr_answer.reset();
+        auto first  = embody::loadManager("manager");
+        auto second = embody::loadManager("manager2");
+        if (yes && second.valid() && second.mayPrimary) {
+            first.mayPrimary = true;  // it may come back the same way
+            embody::saveManager("manager", second);
+            embody::saveManager("manager2", first);
+            _channel.reconnect();
+            queue_event("manager_changed", {}, {{"manager", second.name}});
+            mclog::tagInfo(_tag, "manager: {} now (on the screen), {} second", second.name, first.name);
+        }
+        _mgr_rendered_at = 0;
+    }
+    const uint32_t now = GetHAL().millis();
+    if (!_mgr_show) {
+        if (_mgr_panel && !_mgr_panel->hasFlag(LV_OBJ_FLAG_HIDDEN)) {
+            _mgr_panel->setHidden(true);
+        }
+        return;
+    }
+    auto button = [this](lv_obj_t* parent, const char* text, int x, int y, int w, int action) {
+        lv_obj_t* b = lv_button_create(parent);
+        lv_obj_set_size(b, w, 44);
+        lv_obj_set_pos(b, x, y);
+        lv_obj_set_style_bg_color(b, lv_color_hex(0xE8EBFF), 0);
+        lv_obj_set_style_shadow_width(b, 0, 0);
+        lv_obj_set_style_radius(b, 10, 0);
+        lv_obj_set_user_data(b, (void*)(intptr_t)action);
+        lv_obj_add_event_cb(b, on_server_nav, LV_EVENT_CLICKED, this);
+        lv_obj_t* l = lv_label_create(b);
+        lv_label_set_text(l, text);
+        lv_obj_set_style_text_color(l, lv_color_hex(_color_text), 0);
+        lv_obj_center(l);
+        return b;
+    };
+    auto label = [this](lv_obj_t* parent, const lv_font_t* font, uint32_t color, int x, int y, int w) {
+        lv_obj_t* l = lv_label_create(parent);
+        lv_obj_set_style_text_font(l, font, 0);
+        lv_obj_set_style_text_color(l, lv_color_hex(color), 0);
+        lv_obj_set_width(l, w);
+        lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_WRAP);
+        lv_obj_set_pos(l, x, y);
+        return l;
+    };
+    if (!_mgr_panel) {
+        _mgr_panel = std::make_unique<Container>(lv_screen_active());
+        _mgr_panel->setSize(320, 240);
+        _mgr_panel->setBgColor(lv_color_hex(0xF4F6FF));
+        _mgr_panel->setBorderWidth(0);
+        _mgr_panel->setRadius(0);
+        _mgr_panel->setPadding(0, 0, 0, 0);
+        _mgr_panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_t* p = _mgr_panel->get();
+        lv_obj_t* t = label(p, &lv_font_montserrat_20, _color_text, 12, 14, 200);
+        lv_label_set_text(t, "Manager");
+        button(p, "Back", 226, 4, 88, 5);
+        _mgr_name  = label(p, &lv_font_montserrat_20, _color_text, 12, 52, 300);
+        _mgr_state = label(p, &lv_font_montserrat_16, _color_muted, 12, 80, 300);
+        lv_obj_t* box = lv_obj_create(p);
+        lv_obj_set_size(box, 104, 104);
+        lv_obj_set_pos(box, 12, 108);
+        lv_obj_set_style_bg_color(box, lv_color_hex(0xFFFFFF), 0);
+        lv_obj_set_style_border_width(box, 0, 0);
+        lv_obj_set_style_radius(box, 10, 0);
+        lv_obj_set_style_pad_all(box, 0, 0);
+        lv_obj_remove_flag(box, LV_OBJ_FLAG_SCROLLABLE);
+        _mgr_qr = lv_qrcode_create(box);
+        lv_qrcode_set_size(_mgr_qr, 96);
+        lv_qrcode_set_quiet_zone(_mgr_qr, true);
+        lv_qrcode_set_dark_color(_mgr_qr, lv_color_hex(0x000000));
+        lv_qrcode_set_light_color(_mgr_qr, lv_color_hex(0xFFFFFF));
+        lv_obj_center(_mgr_qr);
+        _mgr_page   = label(p, &lv_font_montserrat_16, _color_text, 126, 110, 188);
+        _mgr_second = button(p, "", 126, 172, 188, 6);
+        _mgr_rendered_at = 0;
+    }
+    if (_mgr_panel->hasFlag(LV_OBJ_FLAG_HIDDEN)) {
+        _mgr_panel->setHidden(false);
+        _mgr_rendered_at = 0;
+        wake_screen();
+    }
+    if (_mgr_rendered_at && now - _mgr_rendered_at < 1000) {
+        return;
+    }
+    _mgr_rendered_at = now ? now : 1;
+    const auto m      = embody::loadManager("manager");
+    const auto second = embody::loadManager("manager2");
+    if (!m.valid()) {
+        lv_label_set_text(_mgr_name, "No manager");
+        lv_label_set_text(_mgr_state, "Set the robot up over USB (sm.w42.eu, or a home's manager).");
+        lv_label_set_text(_mgr_page, "");
+        lv_obj_add_flag(_mgr_qr, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(_mgr_second, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_label_set_text(_mgr_name, m.name.empty() ? m.id.c_str() : m.name.c_str());
+    const std::string err = _channel.lastError();
+    lv_label_set_text(_mgr_state, _channel.connected() ? LV_SYMBOL_OK " connected" : ("not connected" + (err.empty() ? "" : ": " + err)).c_str());
+    const std::string page = m.page.empty() ? m.url : m.page;
+    if (page != _mgr_qr_text) {
+        _mgr_qr_text = page;
+        lv_qrcode_update(_mgr_qr, page.data(), page.size());
+        lv_label_set_text(_mgr_page, ("Its page:\n" + page).c_str());
+    }
+    lv_obj_remove_flag(_mgr_qr, LV_OBJ_FLAG_HIDDEN);
+    if (second.valid() && second.mayPrimary) {
+        lv_label_set_text(lv_obj_get_child(_mgr_second, 0), ("Use " + second.name).c_str());
+        lv_obj_remove_flag(_mgr_second, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(_mgr_second, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 // (Re)connects to _servers[index]: a fresh client with that URL and token.
@@ -2713,7 +2886,6 @@ void AppEmbodyMode::connect_server(size_t index)
         .commands  = _commands,
         .measurements = measurements,
         .e2e          = _e2e_ok && is_e2e(_servers[index].url) ? &_e2e : nullptr,
-        .appsVersions = embody::appsVersions(embody::loadManagers()),
     });
     _client->onCommand = [this](const std::string& command, const std::string& args) {
         if (command == "speaker_flush") {  // now: the new line's audio arrives right after it
@@ -2774,10 +2946,6 @@ void AppEmbodyMode::connect_server(size_t index)
         return t;
     };
 
-    // Applied in the loop under the LVGL lock, like commands: it may ask on the screen.
-    _client->onManagedApps = [this](const std::string& payload, const std::string& sig) {
-        _pending_managed.emplace_back(payload, sig);
-    };
     _servers_announced = false;  // tell the new server the list once registered
     if (_servers[index].url != _last_app_url) {  // another app (not the same one again: car_board)
         _reset_app_look = true;  // what the last app drew, moved or turned on is not this one's

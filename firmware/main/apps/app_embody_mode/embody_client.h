@@ -42,9 +42,6 @@ public:
         std::vector<std::string> measurements;
         // End-to-end encryption for this server (e2e.h; nullptr: plaintext). Owned by the app.
         E2E* e2e = nullptr;
-        // The versions of the app lists its managers set ("id:version,…", managers.h; "": none):
-        // label "apps_ver", so each manager can tell the owner the robot has its latest list.
-        std::string appsVersions;
     };
 
     using Telemetry = std::vector<std::pair<std::string, double>>;  // double: Unix times need it
@@ -102,17 +99,9 @@ public:
     // Binary messages from the server (e.g. 0x10 picture): type byte, then payload.
     std::function<void(uint8_t type, const std::string& payload)> onBinary;
 
-    // The robot's apps as its manager set them (ManagedApps), relayed by this server: the signed
-    // payload (base64 of JSON) and the manager's signature (base64, ECDSA P-256 over SHA-256).
-    std::function<void(const std::string& payload, const std::string& sig)> onManagedApps;
-
     // Report something that happened on the robot, e.g. "shake", optionally with
     // numeric data such as {x, y} and text data such as {uid}. Dropped while offline.
     void sendEvent(const std::string& name, const Telemetry& data = {}, const Texts& text = {});
-
-    // The versions of the app lists the robot has now, one per manager ("id:version,…", after a
-    // ManagedApps): never sealed (e2e), it is for the servers and managers, who know the lists anyway.
-    void sendAppsVersion(const std::string& versions);
 
     // Send telemetry now, besides the periodic collectTelemetry (e.g. a car's sensors). Main loop only.
     void sendTelemetry(const Telemetry& t);

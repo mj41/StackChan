@@ -30,4 +30,10 @@ bool askOnScreenAndWait(const std::string& question, const std::string& detail, 
  */
 bool questionOpen();
 
+/**
+ * @brief The question on the screen now ("" for none) and its seconds left: the manager's page
+ *        shows it (manager_channel.h).
+ */
+std::string questionText(int* secondsLeft = nullptr);
+
 }  // namespace embody

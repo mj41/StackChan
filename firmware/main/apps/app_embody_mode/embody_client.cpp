@@ -182,9 +182,6 @@ void Client::connect()
     if (_config.e2e) {
         body["labels"]["e2e"] = "1";
     }
-    if (!_config.appsVersions.empty()) {
-        body["labels"]["apps_ver"] = _config.appsVersions;
-    }
     std::string frame;
     ArduinoJson::serializeJson(doc, frame);
     send(frame);
@@ -255,10 +252,6 @@ void Client::handle_frame(const Inbound& in)
         const int watching = body["watching"] | 0;
         _status_text       = watching > 0 ? fmt::format("{} watching now", watching) : "Paired: nobody watching now";
         _revision++;
-    } else if (kind == "ManagedApps") {
-        if (onManagedApps) {
-            onManagedApps(body["payload"] | "", body["sig"] | "");
-        }
     } else if (kind == "RobotCommand") {
         std::string command = body["command"] | "";
         // Encrypted: the relay may only switch streams; what streams stays sealed.
@@ -367,20 +360,6 @@ void Client::sendTelemetry(const Telemetry& t)
         measurements[key] = value;
     }
     send_report(doc);
-}
-
-void Client::sendAppsVersion(const std::string& versions)
-{
-    if (_state != State::Registered) {
-        return;
-    }
-    ArduinoJson::JsonDocument doc;
-    doc["kind"] = "AppsVersion";
-    doc["meta"].to<ArduinoJson::JsonObject>();
-    doc["body"]["versions"] = versions;
-    std::string frame;
-    ArduinoJson::serializeJson(doc, frame);
-    send(frame);
 }
 
 void Client::sendEvent(const std::string& name, const Telemetry& data, const Texts& text)

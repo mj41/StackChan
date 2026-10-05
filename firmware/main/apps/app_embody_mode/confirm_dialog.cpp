@@ -10,10 +10,16 @@
 #include <freertos/task.h>
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <algorithm>
+#include <esp_timer.h>
 
 namespace {
 
 std::atomic<int> s_open{0};  // questions on the screen
+std::mutex s_text_mu;
+std::string s_text;      // the last question asked, while open
+int64_t s_deadline = 0;  // when it runs out (esp_timer, us)
 
 struct Dialog;
 
@@ -37,7 +43,10 @@ void finish(Dialog* d, bool answer)
         return;
     }
     d->finished = true;
-    s_open--;
+    if (--s_open == 0) {
+        std::lock_guard<std::mutex> lock(s_text_mu);
+        s_text.clear();
+    }
     if (d->timer) {
         lv_timer_delete(d->timer);
         d->timer = nullptr;
@@ -73,6 +82,11 @@ void embody::askOnScreen(const std::string& question, const std::string& detail,
 {
     auto* d   = new Dialog;
     s_open++;
+    {
+        std::lock_guard<std::mutex> lock(s_text_mu);
+        s_text     = question;
+        s_deadline = esp_timer_get_time() + (int64_t)seconds * 1000000;
+    }
     d->done   = std::move(done);
     d->yes.dialog = d;
     d->no.dialog  = d;
@@ -141,4 +155,13 @@ bool embody::askOnScreenAndWait(const std::string& question, const std::string& 
 bool embody::questionOpen()
 {
     return s_open > 0;
+}
+
+std::string embody::questionText(int* secondsLeft)
+{
+    std::lock_guard<std::mutex> lock(s_text_mu);
+    if (secondsLeft) {
+        *secondsLeft = s_text.empty() ? 0 : (int)std::max<int64_t>(0, (s_deadline - esp_timer_get_time()) / 1000000);
+    }
+    return s_text;
 }

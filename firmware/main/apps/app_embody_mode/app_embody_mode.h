@@ -5,6 +5,7 @@
  */
 #pragma once
 #include "embody_client.h"
+#include "manager_channel.h"
 #include "e2e.h"
 #include "asset_store.h"
 #include "sprite_layer.h"
@@ -86,14 +87,30 @@ private:
     std::string _server_ask_url;
     bool _server_ask_default = false;  // true: make it the default; false: switch to it
     std::atomic<int> _nav_request{0};            // from the QR screen: +1 next, 2 pin, 3 connect/close
-    lv_obj_t* _server_buttons[3] = {};           // pin, next, back to app / connect
+    lv_obj_t* _server_buttons[4] = {};           // pin, next, back to app / connect, the Manager screen
     std::atomic<bool> _qr_hide_requested{false};  // the close button on the QR screen
     bool _qr_pinned           = false;
     bool _qr_back_to_app      = false;  // Connect on the QR screen: its face once connected
     std::atomic<bool> _reset_app_look{false};  // another app now: reset_for_app
     std::string _last_app_url;                  // the app connect_server last went to
     uint8_t _start_volume = 50;                 // the speaker volume at start: every app starts with it
-    std::vector<std::pair<std::string, std::string>> _pending_managed;  // ManagedApps (payload, sig), for the loop
+    embody::ManagerChannel _channel;  // to the robot's manager (manager_channel.h)
+    // The Manager screen (update_manager_screen)
+    std::unique_ptr<smooth_ui_toolkit::lvgl_cpp::Container> _mgr_panel;
+    lv_obj_t* _mgr_name = nullptr;
+    lv_obj_t* _mgr_state = nullptr;
+    lv_obj_t* _mgr_qr = nullptr;
+    lv_obj_t* _mgr_page = nullptr;
+    lv_obj_t* _mgr_second = nullptr;
+    std::string _mgr_qr_text;
+    bool _mgr_show = false;
+    std::atomic<bool> _mgr_use_second{false};
+    std::shared_ptr<std::atomic<int>> _mgr_answer;
+    uint32_t _mgr_rendered_at = 0;
+    uint32_t _mgr_state_at = 0;
+    uint32_t _mgr_apps_rev = UINT32_MAX;
+    std::string _mgr_apps;       // its apps as {id, name}, for the channel's Hello
+    std::string _switch_answer;  // the last answer to a switch: switched, not confirmed, refused: …
     bool _rendered_qr_visible = false;  // for the swipe-up bar's QR / APP text
     uint32_t _servers_rev          = 0;          // bumped on any change, for the QR screen row
     uint32_t _rendered_servers_rev = UINT32_MAX;
@@ -368,7 +385,9 @@ private:
     void load_servers();
     void save_servers();
     void connect_server(size_t index);
-    void apply_managed(const std::string& payloadB64, const std::string& sig);
+    void apply_signed(const std::string& kind, const std::string& payload);
+    void publish_manager_state(uint32_t now);
+    void update_manager_screen();
     std::string shown_name(size_t index);  // the name on screen: with its manager when two share it
     void announce_servers();
     void render_server_row();

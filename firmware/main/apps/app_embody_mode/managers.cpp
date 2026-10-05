@@ -5,12 +5,14 @@
  */
 #include "managers.h"
 #include <settings.h>
-#include <ArduinoJson.hpp>
 #include <mbedtls/base64.h>
 #include <mbedtls/pk.h>
 #include <mbedtls/sha256.h>
+#include <mutex>
 
 namespace embody {
+
+static std::recursive_mutex s_mu;  // the NVS records, read-modify-write
 
 static bool b64decode(const std::string& in, std::string& out)
 {
@@ -23,46 +25,93 @@ static bool b64decode(const std::string& in, std::string& out)
     return true;
 }
 
-std::vector<Manager> loadManagers()
+static std::string hex_of(const unsigned char* b, size_t n)
 {
-    std::vector<Manager> out;
-    Settings settings("embody", false);
-    ArduinoJson::JsonDocument doc;
-    if (ArduinoJson::deserializeJson(doc, settings.GetString("managers", "[]"))) {
-        return out;
+    static const char* hex = "0123456789abcdef";
+    std::string s;
+    for (size_t i = 0; i < n; i++) {
+        s += hex[b[i] >> 4];
+        s += hex[b[i] & 15];
     }
-    for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
-        Manager m;
-        m.id      = o["id"] | "";
-        m.key     = o["key"] | "";
-        m.name    = o["name"] | "";
-        m.version = o["version"] | 0;
-        m.remote  = o["remote"] | true;
-        m.askPin  = o["ask_pin"] | true;
-        if (!m.id.empty() && !m.key.empty()) {
-            out.push_back(m);
-        }
-    }
-    return out;
+    return s;
 }
 
-void saveManagers(const std::vector<Manager>& managers)
+Manager loadManager(const char* slot)
 {
+    std::lock_guard<std::recursive_mutex> lock(s_mu);
+    Manager m;
+    Settings settings("embody", false);
     ArduinoJson::JsonDocument doc;
-    auto arr = doc.to<ArduinoJson::JsonArray>();
-    for (const auto& m : managers) {
-        auto o       = arr.add<ArduinoJson::JsonObject>();
-        o["id"]      = m.id;
-        o["key"]     = m.key;
-        o["name"]    = m.name;
-        o["version"] = m.version;
-        o["remote"]  = m.remote;
-        o["ask_pin"] = m.askPin;
+    if (ArduinoJson::deserializeJson(doc, settings.GetString(slot, "{}"))) {
+        return m;
     }
+    m.id         = doc["id"] | "";
+    m.key        = doc["key"] | "";
+    m.name       = doc["name"] | "";
+    m.url        = doc["url"] | "";
+    m.token      = doc["token"] | "";
+    m.page       = doc["page"] | "";
+    m.seq        = doc["seq"] | 0;
+    m.version    = doc["version"] | 0;
+    m.remote     = doc["remote"] | true;
+    m.askPin     = doc["ask_pin"] | true;
+    m.mayPrimary = doc["may_primary"] | false;
+    return m;
+}
+
+void saveManager(const char* slot, const Manager& m)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_mu);
+    ArduinoJson::JsonDocument doc;
+    doc["id"]          = m.id;
+    doc["key"]         = m.key;
+    doc["name"]        = m.name;
+    doc["url"]         = m.url;
+    doc["token"]       = m.token;
+    doc["page"]        = m.page;
+    doc["seq"]         = m.seq;
+    doc["version"]     = m.version;
+    doc["remote"]      = m.remote;
+    doc["ask_pin"]     = m.askPin;
+    doc["may_primary"] = m.mayPrimary;
     std::string json;
     ArduinoJson::serializeJson(doc, json);
     Settings settings("embody", true);
-    settings.SetString("managers", json);
+    settings.SetString(slot, json);
+}
+
+void clearManager(const char* slot)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_mu);
+    Settings settings("embody", true);
+    settings.EraseKey(slot);
+}
+
+void updateManager(const char* slot, const std::function<void(Manager&)>& change)
+{
+    std::lock_guard<std::recursive_mutex> lock(s_mu);
+    Manager m = loadManager(slot);
+    change(m);
+    saveManager(slot, m);
+}
+
+bool managerFromJson(ArduinoJson::JsonVariantConst o, Manager& m)
+{
+    m.key = o["key"] | "";
+    m.id  = managerId(m.key);
+    if (m.id.empty() || m.key.size() > 256) {
+        return false;
+    }
+    m.name       = o["name"] | "";
+    m.url        = o["url"] | "";
+    m.token      = o["token"] | "";
+    m.page       = o["page"] | "";
+    m.seq        = o["seq"] | 0;
+    m.version    = o["version"] | 0;
+    m.remote     = o["remote_apps"] | true;
+    m.askPin     = o["ask_pin"] | true;
+    m.mayPrimary = o["may_primary"] | false;
+    return m.url.rfind("ws://", 0) == 0 || m.url.rfind("wss://", 0) == 0;
 }
 
 std::string managerId(const std::string& keyB64)
@@ -73,13 +122,7 @@ std::string managerId(const std::string& keyB64)
     }
     unsigned char hash[32];
     mbedtls_sha256((const unsigned char*)der.data(), der.size(), hash, 0);
-    static const char* hex = "0123456789abcdef";
-    std::string id;
-    for (int i = 0; i < 6; i++) {
-        id += hex[hash[i] >> 4];
-        id += hex[hash[i] & 15];
-    }
-    return id;
+    return hex_of(hash, 6);
 }
 
 bool managerSigned(const std::string& keyB64, const std::string& payload, const std::string& sigB64)
@@ -100,16 +143,11 @@ bool managerSigned(const std::string& keyB64, const std::string& payload, const 
     return ok;
 }
 
-std::string appsVersions(const std::vector<Manager>& managers)
+std::string appId(const std::string& url)
 {
-    std::string out;
-    for (const auto& m : managers) {
-        if (!out.empty()) {
-            out += ",";
-        }
-        out += m.id + ":" + std::to_string(m.version);
-    }
-    return out;
+    unsigned char hash[32];
+    mbedtls_sha256((const unsigned char*)url.data(), url.size(), hash, 0);
+    return hex_of(hash, 8);
 }
 
 }  // namespace embody
