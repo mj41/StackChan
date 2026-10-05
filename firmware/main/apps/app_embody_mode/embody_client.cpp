@@ -251,14 +251,10 @@ void Client::handle_frame(const Inbound& in)
     } else if (kind == "Paired") {
         _viewers             = body["viewers"] | 0;
         _paired_on_reconnect = body["reconnect"] | false;
-        _status_text = _viewers == 1 ? "Paired with 1 browser" : fmt::format("Paired with {} browsers", _viewers);
+        // What the person sees: who has the app open now (not every browser that ever paired).
+        const int watching = body["watching"] | 0;
+        _status_text       = watching > 0 ? fmt::format("{} watching now", watching) : "Paired: nobody watching now";
         _revision++;
-    } else if (kind == "ServerOffer") {
-        if (onServerOffer && body["servers"].is<ArduinoJson::JsonArray>()) {
-            std::string servers;
-            ArduinoJson::serializeJson(body["servers"], servers);
-            onServerOffer(servers);
-        }
     } else if (kind == "ManagedApps") {
         if (onManagedApps) {
             onManagedApps(body["payload"] | "", body["sig"] | "");

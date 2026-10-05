@@ -40,7 +40,7 @@ QR screen's buttons are described under [Servers](#servers).
 
 ## Servers
 
-The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), servers a server **offers** (`ServerOffer`, sent after `Accepted`; s-w42-eu-raw `-offer`), and servers **added** from a paired browser (`server_add {url, name, token}`) or **over USB** (below). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
+The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), its **managers'** apps (a Stackchan manager: set up over USB, changed later online by signed lists), and servers written **over USB** without a manager (below). **Apps never change the list:** adding, removing and the start app are the managers' (and the person's at the robot, on the QR screen). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
 - **QR screen:** swipe up from the bottom; next to Home, **QR** opens it, and while it is open that button reads **APP** and goes back to the app. The top row is `Pin  name n/m  Next ▶`; the bottom-right button reads **Back to app** on the connected server and **Connect** on another one.
   - **Next** browses the list; the connection stays, and another server's code comes only after Connect.
@@ -49,7 +49,7 @@ The robot keeps a **server list** in NVS (namespace `embody`): the built-in serv
   - **Which app runs:** after every connection the app's name shows as a card at the top for 2.5 s, then as a small label in the top-right corner (hidden on the QR screen and a blank screen), so apps that use the robot's own face (Raw data, Sbot) can be told apart.
   - **Pin** makes the shown one the **default** used at start (blue); tapping Pin on the default **unpins** it.
   - With no default, Embody Mode starts as a **chooser**: it contacts nothing until Connect.
-- **From a browser:** `server_switch`, `server_default`, `server_remove {server: url or name}` (not the built-in or current one). A switch to another server or a new default is **asked on the robot's screen first** ("Connect to …?" / "Start with …?", 60 s; events `server_asking`, then `server_refused` without a Yes); clearing the default and the QR screen's own buttons need no question.
+- **From a browser:** `server_switch {server: url or name}` only (an app may suggest another app). It is **asked on the robot's screen first** ("Connect to …?", 60 s; events `server_asking`, then `server_refused` without a Yes), as a manager's new start app is ("Start with …?"); the QR screen's own buttons need no question.
 - **On the QR screen,** the card shows the shown server's address, whether it is on the local network or the internet, and whether the connection is encrypted (TLS).
 
 ## Setup over USB

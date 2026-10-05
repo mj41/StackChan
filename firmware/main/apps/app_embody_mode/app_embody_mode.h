@@ -66,11 +66,11 @@ public:
 private:
     std::unique_ptr<embody::Client> _client;
 
-    // Servers the robot can use: the built-in one (Kconfig), ones servers offered
-    // (ServerOffer) and ones added from a browser. Stored in NVS ("embody"). The QR
-    // screen switches between them; the default one is used at start.
+    // Servers (apps) the robot can use: the built-in one (Kconfig), its managers' apps and ones
+    // written over USB. Stored in NVS ("embody"). The QR screen switches between them; the default
+    // one is used at start. Apps never add, remove or pin apps: that is the managers' job.
     struct ServerEntry {
-        std::string name, url, token, origin;  // origin: built-in, offered, added
+        std::string name, url, token, origin;  // origin: built-in, manager:<id>, added (USB)
     };
     std::vector<ServerEntry> _servers;
     size_t _server_index = 0;  // the server the client talks to
@@ -80,7 +80,7 @@ private:
     std::vector<std::string> _commands;
     bool _servers_announced = false;
     int _pending_switch     = -1;                // from server_switch, done at the top of the loop
-    // A server's server_switch or server_default (another server, a new default) is confirmed on
+    // A server's server_switch, or a manager's new start app, is confirmed on
     // the robot's screen first, as a new default over USB: only the person at the robot moves it.
     std::shared_ptr<std::atomic<int>> _server_answer;  // 0 waiting, 1 Yes, -1 No or no answer
     std::string _server_ask_url;
@@ -364,8 +364,8 @@ private:
     void load_servers();
     void save_servers();
     void connect_server(size_t index);
-    void merge_offers(const std::string& serversJson);
     void apply_managed(const std::string& payloadB64, const std::string& sig);
+    std::string shown_name(size_t index);  // the name on screen: with its manager when two share it
     void announce_servers();
     void render_server_row();
     int find_server(const std::string& key);

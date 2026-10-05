@@ -102,9 +102,6 @@ public:
     // Binary messages from the server (e.g. 0x10 picture): type byte, then payload.
     std::function<void(uint8_t type, const std::string& payload)> onBinary;
 
-    // Other servers this server offers (ServerOffer): the JSON array of {name, url, token?}.
-    std::function<void(const std::string& serversJson)> onServerOffer;
-
     // The robot's apps as its manager set them (ManagedApps), relayed by this server: the signed
     // payload (base64 of JSON) and the manager's signature (base64, ECDSA P-256 over SHA-256).
     std::function<void(const std::string& payload, const std::string& sig)> onManagedApps;

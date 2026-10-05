@@ -219,7 +219,9 @@ void AppEmbodyMode::onOpen()
     commands.push_back("asset_delete");
     commands.push_back("servo_power");
     commands.push_back("rotate");
-    for (const char* c : {"server_add", "server_remove", "server_default", "server_switch", "server_e2e", "e2e_forget"}) {
+    // The robot's apps are its managers' to change (managers.h), never an app's: an app may only
+    // suggest a switch (asked on the screen) and set its own end-to-end encryption.
+    for (const char* c : {"server_switch", "server_e2e", "e2e_forget"}) {
         commands.push_back(c);
     }
     if (hal_bridge::board_get_camera()) {
@@ -336,7 +338,7 @@ void AppEmbodyMode::onRunning()
             announce_servers();
             {
                 std::lock_guard<std::mutex> lock(_event_mutex);
-                _app_card_text = _servers[_server_index].name;
+                _app_card_text = shown_name(_server_index);
             }
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
             queue_event("automation", {{"autostart", embody::autostart() ? 1.0 : 0.0}});
@@ -1200,50 +1202,6 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         }
         _prox_base = -1;  // re-learn the baseline when it comes back
         mclog::tagInfo(_tag, "proximity {}", _proximity_on ? "on" : "off");
-    } else if (command == "server_add") {
-        // {"url": "ws://...|wss://...", "name", "token"}: add or update an entry (not the built-in one)
-        const std::string url = args["url"] | "";
-        if (url.rfind("ws://", 0) == 0 || url.rfind("wss://", 0) == 0) {
-            const std::string name = args["name"] | host_of(url).c_str();
-            const int i            = find_server(url);
-            if (i < 0) {
-                _servers.push_back({name, url, args["token"] | "", "added"});
-            } else if (i > 0) {
-                _servers[i].name = name;
-                if (args["token"].is<const char*>()) {
-                    _servers[i].token = args["token"].as<const char*>();
-                }
-            }
-            save_servers();
-        }
-        announce_servers();
-    } else if (command == "server_remove") {
-        // {"server": url or name}; not the built-in or the current one
-        const int i = find_server(args["server"] | "");
-        if (i > 0 && (size_t)i != _server_index) {
-            if (_servers[i].url == _default_url) {
-                _default_url = _servers[0].url;
-            }
-            _servers.erase(_servers.begin() + i);
-            if ((size_t)i < _server_index) {
-                _server_index--;
-            }
-            _shown_index = _server_index;
-            _servers_rev++;
-            save_servers();
-        }
-        announce_servers();
-    } else if (command == "server_default") {
-        // {"server": url or name}; "" clears it (the robot then asks at start)
-        const std::string key = args["server"] | "";
-        const int i           = find_server(key);
-        if (key.empty()) {  // no default: the robot asks at start (needs no Yes)
-            _default_url = "";
-            save_servers();
-        } else if (i >= 0 && _servers[i].url != _default_url) {
-            request_server_change(i, true);  // a new default: asked on the robot's screen
-        }
-        announce_servers();
     } else if (command == "server_switch") {
         // Leaves this server: the robot reconnects to the other one right away
         const int i = find_server(args["server"] | "");
@@ -2442,33 +2400,6 @@ int AppEmbodyMode::find_server(const std::string& key)
     return -1;
 }
 
-// A server offers others (voluntarily): add them, or refresh ones it offered before.
-void AppEmbodyMode::merge_offers(const std::string& serversJson)
-{
-    ArduinoJson::JsonDocument doc;
-    if (ArduinoJson::deserializeJson(doc, serversJson)) {
-        return;
-    }
-    for (ArduinoJson::JsonObject o : doc.as<ArduinoJson::JsonArray>()) {
-        const std::string url = o["url"] | "";
-        if (url.rfind("ws://", 0) != 0 && url.rfind("wss://", 0) != 0) {
-            continue;
-        }
-        const std::string name = o["name"] | host_of(url).c_str();
-        const int i            = find_server(url);
-        if (i < 0) {
-            _servers.push_back({name, url, o["token"] | "", "offered"});
-        } else if (_servers[i].origin == "offered") {
-            _servers[i].name = name;
-            if (o["token"].is<const char*>()) {
-                _servers[i].token = o["token"].as<const char*>();
-            }
-        }
-    }
-    save_servers();
-    announce_servers();
-}
-
 // The robot's apps as one of its managers set them (ManagedApps, relayed by the server it is on;
 // managers.h). Only from a manager it was set up by over USB that may change its apps, signed with
 // that manager's key, for this robot and newer than its last list. That manager's apps
@@ -2535,6 +2466,9 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
     }
     _servers   = next;
     m->version = version;
+    if (const std::string name = doc["name"] | ""; !name.empty() && name.size() <= 64) {
+        m->name = name;  // the manager's name may change
+    }
     const bool askPin = m->askPin;
     embody::saveManagers(managers);
     const int cur  = find_server(current);
@@ -2600,6 +2534,29 @@ void AppEmbodyMode::publish_status(uint32_t now)
     }
 }
 
+// An app's name on the screen (QR screen, name card, badge): its own, and when another app has the
+// same name (two managers' "Raw data"), also its manager's name or, without one, its host.
+std::string AppEmbodyMode::shown_name(size_t index)
+{
+    const auto& e = _servers[index];
+    bool twin     = false;
+    for (size_t i = 0; i < _servers.size(); i++) {
+        twin = twin || (i != index && _servers[i].name == e.name);
+    }
+    if (!twin) {
+        return e.name;
+    }
+    std::string by = host_of(e.url);
+    if (e.origin.rfind("manager:", 0) == 0) {
+        for (const auto& m : embody::loadManagers()) {
+            if (embody::managerOrigin(m.id) == e.origin && !m.name.empty()) {
+                by = m.name;
+            }
+        }
+    }
+    return e.name + " (" + by + ")";
+}
+
 // The "servers" event: the list without tokens, the current and the default one.
 void AppEmbodyMode::announce_servers()
 {
@@ -2627,7 +2584,7 @@ void AppEmbodyMode::render_server_row()
     _shown_index          = std::min(_shown_index, _servers.size() - 1);
     const auto& e         = _servers[_shown_index];
     const bool is_current = _client && _shown_index == _server_index;
-    _title->setText(e.name);
+    _title->setText(shown_name(_shown_index));
     // Its place among the real apps (the release's empty "Set up" entry does not count).
     size_t pos = 0, count = 0;
     for (size_t i = 0; i < _servers.size(); i++) {
@@ -2774,7 +2731,6 @@ void AppEmbodyMode::connect_server(size_t index)
         return t;
     };
 
-    _client->onServerOffer = [this](const std::string& offers) { merge_offers(offers); };
     _client->onManagedApps = [this](const std::string& payload, const std::string& sig) { apply_managed(payload, sig); };
     _servers_announced = false;  // tell the new server the list once registered
     _reset_app_look    = true;   // what the last app drew (its face, a picture, LEDs) is not this one's
