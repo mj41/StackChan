@@ -2464,6 +2464,19 @@ void AppEmbodyMode::apply_managed(const std::string& payloadB64, const std::stri
         next.erase(std::remove_if(next.begin(), next.end(), [&](const ServerEntry& e) { return e.url == url; }), next.end());
         next.push_back({o["name"] | host_of(url).c_str(), url, token, origin});
     }
+    // Browsers removed in the manager: they can no longer read the robot (a new group key).
+    if (doc["forget_all"] | false) {
+        _e2e.forgetAll();
+        queue_event("e2e_forgotten");
+    } else {
+        int forgotten = 0;
+        for (ArduinoJson::JsonVariant b : doc["forget"].as<ArduinoJson::JsonArray>()) {
+            forgotten += _e2e.forget(b | "") ? 1 : 0;
+        }
+        if (forgotten > 0) {
+            queue_event("e2e_forgotten", {{"browsers", (double)forgotten}});
+        }
+    }
     _servers   = next;
     m->version = version;
     if (const std::string name = doc["name"] | ""; !name.empty() && name.size() <= 64) {

@@ -7,6 +7,7 @@
 #include <settings.h>
 #include <mooncake_log.h>
 #include <ArduinoJson.hpp>
+#include <algorithm>
 #include <esp_random.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/ecdh.h>
@@ -448,6 +449,25 @@ void E2E::forgetAll()
     settings.SetString("browsers", "");
     settings.SetInt("epoch", (int32_t)_epoch);
     mclog::tagInfo(_tag, "all browsers forgotten, epoch {}", _epoch);
+}
+
+bool E2E::forget(const std::string& browserId)
+{
+    std::lock_guard<std::mutex> lock(_mu);
+    if (!_pairwise.erase(browserId)) {
+        return false;
+    }
+    _browsers.erase(std::remove_if(_browsers.begin(), _browsers.end(),
+                                   [&](const Key& b) { return browser_id(b) == browserId; }),
+                    _browsers.end());
+    _seqs.erase(browserId);
+    _epoch++;  // the others ask for the new group key (E2EHello)
+    esp_fill_random(_group.data(), _group.size());
+    save();
+    Settings settings("embody_e2e", true);
+    settings.SetInt("epoch", (int32_t)_epoch);
+    mclog::tagInfo(_tag, "browser {} forgotten ({} left), epoch {}", browserId, _browsers.size(), _epoch);
+    return true;
 }
 
 /* -------------------------------- self-test ------------------------------- */

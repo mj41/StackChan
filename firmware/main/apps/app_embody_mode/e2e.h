@@ -51,6 +51,8 @@ public:
     size_t enrolled() const;
     // Forgets every browser and starts a new epoch.
     void forgetAll();
+    // Forgets one browser (its id, 16 hex); a new epoch, so it cannot read on. False: not enrolled.
+    bool forget(const std::string& browserId);
 
     // Checks the implementation against the reference test vectors; logs and returns the result.
     static bool selfTest();
