@@ -244,7 +244,7 @@ On the robot:
 
 ## More servers and apps
 
-The robot keeps a **list of servers** (its apps), set by its managers, and can switch between
+The robot keeps a **list of servers** (its apps), set by its manager, and can switch between
 them:
 
 - **On the robot:** open the QR screen (swipe up, **QR**). **Next** shows the next server,
@@ -252,8 +252,14 @@ them:
 - **More apps** come from the manager's catalog: add an app to your manager's
   `~/.config/s-w42-eu-manager/apps.json` and set the robot up again (B), or change its apps
   online on the manager's page (if you allowed that at setup).
-- **Several managers:** each manages only its own apps. A robot set up on sm.w42.eu (A) and on
-  your own manager (B) keeps both, and the QR screen shows them all.
+- **One manager:** the one that set the robot up last over USB (A: sm.w42.eu, or B: your
+  own). The robot keeps a connection to it: its page shows the robot live (which app, a
+  question on its screen and the answer) and switches it to any of its apps at once. The QR
+  screen's gear shows the manager and its page's address.
+- **Your own manager and sm.w42.eu:** link your manager to your sm.w42.eu account (the
+  **Link to sm.w42.eu** card on its page): sm.w42.eu then shows your robots too (read-only, or
+  with full control if you allow it), their apps can come from sm.w42.eu's catalog, and it may
+  become a robot's manager on its screen if you allowed that at setup.
 - **From an app:** an app may suggest switching to another of the robot's apps (in the
   dashboard: **Apps**, **Switch**); the robot asks on its screen.
 

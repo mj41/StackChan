@@ -120,13 +120,22 @@ public:
 
     // IRQ status 2 (0x49) latches power-key presses and plug changes; writing 1s clears them.
     // The first call also enables those IRQ sources (reg 0x41), so they latch for sure.
+    // Polled from the app loop: a busy I2C bus (a timeout) skips this poll instead of aborting
+    // (ReadReg's ESP_ERROR_CHECK restarted the robot when an app switch touched many devices).
     uint8_t TakeEvents()
     {
+        uint8_t v = 0;
         if (!events_enabled_) {
-            WriteReg(0x41, ReadReg(0x41) | 0xFC);
+            if (TryReadRegs(0x41, &v, 1, 100) != ESP_OK) {
+                return 0;
+            }
+            WriteReg(0x41, v | 0xFC);
             events_enabled_ = true;
         }
-        const uint8_t v = ReadReg(0x49) & 0xFC;
+        if (TryReadRegs(0x49, &v, 1, 100) != ESP_OK) {
+            return 0;
+        }
+        v &= 0xFC;
         if (v) {
             WriteReg(0x49, v);
         }

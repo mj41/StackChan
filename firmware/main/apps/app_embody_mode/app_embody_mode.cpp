@@ -2811,25 +2811,42 @@ void AppEmbodyMode::update_manager_screen()
 // the last app drew, moved or turned on is not the next one's. LVGL lock held.
 void AppEmbodyMode::reset_for_app()
 {
-    static const std::pair<const char*, const char*> defaults[] = {
-        {"camera", R"({"on":false})"},       {"mic", R"({"on":false})"},          {"imu_stream", R"({"on":false})"},
-        {"touch_stream", R"({"on":false})"}, {"light_stream", R"({"on":false})"}, {"play_stop", "{}"},
-        {"rotate", R"({"velocity":0})"},     {"hold", R"({"seconds":0})"},        {"servo_power", R"({"on":true})"},
-        {"home", "{}"},                      {"proximity", R"({"on":true})"},     {"brightness", R"({"auto":true})"},
-        {"screensaver", R"({"on":false})"},  {"sprite_clear", "{}"},              {"face", "{}"},
-        {"emotion", R"({"name":"neutral"})"}, {"leds", R"({"left":"#000000","right":"#000000"})"},
-        {"car_stop", "{}"},
+    // Only what is not at its default yet: a burst of I2C traffic (light sensor, PMIC, codec) at
+    // once has timed the bus out.
+    std::vector<std::pair<const char*, const char*>> todo;
+    auto need = [&](bool differs, const char* command, const char* args) {
+        if (differs) {
+            todo.emplace_back(command, args);
+        }
     };
+    need(_camera_on, "camera", R"({"on":false})");
+    need(_mic_running, "mic", R"({"on":false})");
+    need(_imu_streaming, "imu_stream", R"({"on":false})");
+    need(_touch_streaming, "touch_stream", R"({"on":false})");
+    need(_light_streaming, "light_stream", R"({"on":false})");
+    need(true, "play_stop", "{}");
+    need(_rotate_until != 0, "rotate", R"({"velocity":0})");
+    need(true, "hold", R"({"seconds":0})");
+    need(!_servo_power, "servo_power", R"({"on":true})");
+    need(true, "home", "{}");
+    need(!_proximity_on, "proximity", R"({"on":true})");
+    need(_light && !_auto_brightness, "brightness", R"({"auto":true})");
+    need(true, "screensaver", R"({"on":false})");
+    need(true, "sprite_clear", "{}");
+    need(true, "face", "{}");
+    need(true, "emotion", R"({"name":"neutral"})");
+    need(true, "leds", R"({"left":"#000000","right":"#000000"})");
+    need(_car && _car_enabled, "car_stop", "{}");
+    need(_nfc && !_nfc_enabled, "nfc", R"({"on":true})");
     const std::string last = _last_command;
-    for (const auto& [command, args] : defaults) {
+    for (const auto& [command, args] : todo) {
         run_command(command, args);
     }
     _last_command = last;  // not one of these on the status screen
-    if (_nfc && !_nfc_enabled) {
-        run_command("nfc", R"({"on":true})");
+    if (GetHAL().getSpeakerVolume() != _start_volume) {
+        GetHAL().setSpeakerVolume(_start_volume);
     }
-    GetHAL().setSpeakerVolume(_start_volume);
-    mclog::tagInfo(_tag, "a new app: sensors and actuators back to the defaults");
+    mclog::tagInfo(_tag, "a new app: sensors and actuators back to the defaults ({} changes)", todo.size());
 }
 
 void AppEmbodyMode::connect_server(size_t index)
