@@ -64,6 +64,14 @@ void onManagerChanged(std::function<void()> fn);
 void managerChanged();
 
 /**
+ * @brief A USB setup gives the robot another manager: the old one hears it first (Leaving, with
+ *        the new one's name), so its page can say where the robot went (manager_channel.h).
+ *        Returns when that is sent, or after a moment. Embody Mode sets the hook.
+ */
+void onManagerLeaving(std::function<void(const std::string& to)> fn);
+void managerLeaving(const std::string& to);
+
+/**
  * @brief Automation (tests): the app loop stops for this many seconds, as if it hung; the manager
  *        channel then reports it stuck. 0: none pending. Embody Mode takes it in its loop.
  */

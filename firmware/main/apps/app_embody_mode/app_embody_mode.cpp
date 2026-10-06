@@ -245,6 +245,7 @@ void AppEmbodyMode::onOpen()
     load_servers();
     _channel.start(_robot_id);  // to its manager, apart from the apps (manager_channel.h)
     embody::onManagerChanged([this]() { _channel.reconnect(); });
+    embody::onManagerLeaving([this](const std::string& to) { _channel.leave(to); });
     if (!_default_url.empty()) {
         connect_server(_server_index);
     }  // else: the QR screen is a chooser (Next, Connect); nothing is contacted until then

@@ -37,6 +37,9 @@ public:
     void reconnect() { _reconnect = true; }
     // Turned off on the Manager screen (already saved): tell the manager, close.
     void turnOff() { _off = true; }
+    // A USB setup gives the robot another manager (to: its name): tell this one before it goes
+    // (Leaving). Waits up to 2 s for the frame to go out; at once when not connected.
+    void leave(const std::string& to);
     // The app loop is alive: call every loop.
     void beat();
     // What the app loop reports: state (a JSON object: app, app_name, conn, question, answer,
@@ -55,13 +58,15 @@ private:
     std::atomic<bool> _connected{false};
     std::atomic<bool> _reconnect{false};
     std::atomic<bool> _off{false};  // turned off on the robot: say so, then close
+    std::atomic<bool> _leave{false};  // set up with another manager: say so (Leaving)
+    std::atomic<bool> _left{false};   // Leaving sent
     std::atomic<int64_t> _beat_us{0};
     std::atomic<int64_t> _last_rx{0};  // the socket's callbacks: members, they may run as it closes
     std::atomic<bool> _closed{false};
     bool _started = false;
 
     mutable std::mutex _mu;
-    std::string _state, _apps, _sent, _apps_sent, _error, _page_url;
+    std::string _state, _apps, _sent, _apps_sent, _error, _page_url, _leave_to;
     std::deque<std::string> _inbox;  // raw frames from the socket
     std::deque<Message> _out;        // checked messages for the app loop
 

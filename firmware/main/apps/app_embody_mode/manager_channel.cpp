@@ -60,6 +60,22 @@ bool ManagerChannel::pop(Message& out)
     return true;
 }
 
+void ManagerChannel::leave(const std::string& to)
+{
+    if (!_connected) {
+        return;  // nobody to tell
+    }
+    {
+        std::lock_guard<std::mutex> lock(_mu);
+        _leave_to = to;
+    }
+    _left  = false;
+    _leave = true;
+    for (int waited = 0; waited < 2000 && !_left && _connected; waited += 50) {
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
 std::string ManagerChannel::pageUrl() const
 {
     std::lock_guard<std::mutex> lock(_mu);
@@ -183,6 +199,20 @@ void ManagerChannel::session()
                 mclog::tagInfo(_tag, "turned off by {}: apps change only over USB now", m.name);
                 return;
             }
+        }
+        if (_leave.exchange(false)) {  // a USB setup gives it another manager: tell this one
+            ArduinoJson::JsonDocument doc;
+            doc["kind"] = "Leaving";
+            {
+                std::lock_guard<std::mutex> lock(_mu);
+                doc["body"]["to"] = _leave_to;
+            }
+            std::string frame;
+            ArduinoJson::serializeJson(doc, frame);
+            ws->Send(frame);
+            vTaskDelay(pdMS_TO_TICKS(300));
+            _left = true;
+            mclog::tagInfo(_tag, "told {}: set up with another manager", m.name);
         }
         if (_off) {  // turned off on the robot's Manager screen
             ws->Send("{\"kind\":\"Off\",\"body\":{\"by\":\"robot\"}}");

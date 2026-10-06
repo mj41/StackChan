@@ -277,6 +277,7 @@ static bool screenshot(ArduinoJson::JsonDocument& res)
 #endif
 
 static std::function<void()> s_manager_changed;
+static std::function<void(const std::string&)> s_manager_leaving;
 static std::atomic<int> s_stall{0};
 
 int embody::takeStall()
@@ -287,6 +288,18 @@ int embody::takeStall()
 void embody::onManagerChanged(std::function<void()> fn)
 {
     s_manager_changed = std::move(fn);
+}
+
+void embody::onManagerLeaving(std::function<void(const std::string&)> fn)
+{
+    s_manager_leaving = std::move(fn);
+}
+
+void embody::managerLeaving(const std::string& to)
+{
+    if (s_manager_leaving) {
+        s_manager_leaving(to);
+    }
 }
 
 void embody::managerChanged()
@@ -435,6 +448,9 @@ static void handle(const std::string& json)
             const bool has_second = req["manager2"].is<ArduinoJson::JsonObject>();
             if (has_second && !embody::managerFromJson(req["manager2"], second)) {
                 return reply_error("manager2: {key, url, token, may_primary, …}");
+            }
+            if (const embody::Manager old = embody::loadManager("manager"); old.valid() && old.id != m.id) {
+                embody::managerLeaving(m.name.empty() ? "another manager" : m.name);  // before it goes
             }
             embody::saveManager("manager", m);
             if (has_second) {
