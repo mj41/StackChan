@@ -2080,10 +2080,14 @@ void AppEmbodyMode::update_server_question()
     if (!yes || i < 0) {
         queue_event("server_refused", {}, {{"server", _server_ask_url}, {"reason", "not confirmed on the robot"}});
         mclog::tagInfo(_tag, "server change not confirmed on the robot");
-        _switch_answer = "not confirmed";  // for the manager (publish_manager_state)
+        if (!_server_ask_default) {
+            _switch_answer = "not confirmed";  // for the manager (publish_manager_state)
+        }
         return;
     }
-    _switch_answer = "switched";
+    if (!_server_ask_default) {
+        _switch_answer = "switched";  // a start app's question is not a switch
+    }
     if (_server_ask_default) {
         _default_url = _servers[i].url;
         save_servers();
@@ -2824,7 +2828,7 @@ void AppEmbodyMode::update_manager_screen()
     }
     lv_label_set_text(_mgr_name, m.name.empty() ? m.id.c_str() : m.name.c_str());
     const std::string err = _channel.lastError();
-    lv_label_set_text(_mgr_state, !m.enabled ? "off: apps over USB only, switch on the QR screen"
+    lv_label_set_text(_mgr_state, !m.enabled ? "off: apps only over USB"
                                   : _channel.connected() ? LV_SYMBOL_OK " connected"
                                                          : ("not connected" + (err.empty() ? "" : ": " + err)).c_str());
     lv_label_set_text(lv_obj_get_child(_mgr_toggle_btn, 0), m.enabled ? "Turn off" : "Turn on");

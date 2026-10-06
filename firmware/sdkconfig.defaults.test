@@ -1,0 +1,4 @@
+# ./container.sh test: the release configuration for tests of the robot's screens by a program on
+# the USB cable (s-w42-eu-usb tap): no Yes for USB control, and taps may answer the robot's own
+# questions. Never in a release (release.sh does not read this file).
+CONFIG_STACKCHAN_EMBODY_TEST_TAPS=y

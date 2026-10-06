@@ -1063,6 +1063,16 @@ config STACKCHAN_EMBODY_AUTOMATION
         Home in Embody Mode still leaves the robot in the launcher. AI.AGENT's
         own "start on boot" setting wins over autostart.
 
+config STACKCHAN_EMBODY_TEST_TAPS
+    bool "Tests only: taps over USB need no Yes and may answer the robot's questions"
+    depends on STACKCHAN_EMBODY_AUTOMATION
+    default n
+    help
+        Never in a release. For a program on the USB cable that tests the robot's
+        screens end to end (s-w42-eu-usb tap): control over USB is allowed without
+        the person's Yes, and taps reach the robot's own questions ("Connect to …?",
+        "Make … this robot's manager?"). ./container.sh test builds with it.
+
 endmenu
 
 menu "StackChan firmware updates"

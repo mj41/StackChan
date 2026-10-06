@@ -70,3 +70,4 @@ xiaozhi-esp32/
 sdkconfig.defaults.local
 build-container/
 build-release/
+build-test/

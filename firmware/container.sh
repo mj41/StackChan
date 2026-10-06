@@ -4,6 +4,9 @@
 #
 #   ./container.sh build              fetch the dependencies if missing, then build
 #   ./container.sh release            the official image (release.sh; no server or token): build-release/dist
+#   ./container.sh test               the release configuration + sdkconfig.defaults.test (taps over USB
+#                                     need no Yes and may answer the robot's questions): build-test;
+#                                     BUILD_DIR=build-test ./container.sh flash. Never released.
 #   ./container.sh flash [PORT]       flash (the CoreS3's USB serial port is found by itself)
 #   ./container.sh menuconfig         the ESP-IDF configuration menu
 #   ./container.sh shell              a shell in the container, in this directory
@@ -70,6 +73,11 @@ case ${1:-build} in
         need_deps
         EXTRA_ARGS=(-e "SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)")  # git sees the repo only here
         run ./release.sh "$(git describe --tags --match 'embody-v*' --always 2>/dev/null || echo dev)"
+        ;;
+    test)
+        need_deps
+        run idf.py -B build-test -D STACKCHAN_RELEASE=1 -D EMBODY_VERSION="test" -D SDKCONFIG=build-test/sdkconfig \
+            -D SDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.defaults.release;sdkconfig.defaults.test" build
         ;;
     menuconfig)
         run idf.py -B "$BUILD_DIR" menuconfig

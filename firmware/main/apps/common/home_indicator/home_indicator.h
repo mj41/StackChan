@@ -16,6 +16,8 @@ void update_home_indicator();
 // screen. Call after create_home_indicator(); onClick runs in update_home_indicator().
 void set_home_indicator_extra_button(const char* text, std::function<void(void)> onClick);
 void set_home_indicator_extra_text(const char* text);
+// Another pointer whose swipe up from the bottom edge also opens the bar (automation over USB).
+void set_home_gesture_extra_indev(lv_indev_t* indev);
 bool is_home_indicator_created();
 void destroy_home_indicator();
 

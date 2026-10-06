@@ -11,12 +11,13 @@ Launcher app (first icon) that lets you control this Stackchan from a browser th
 > **Want more?** Ask in the [issues](https://github.com/mj41/home-w42-eu/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
 > mj41 codes for attention food.
 
-| The face, while a browser drives it | The QR screen: scan to pair, or type the code |
-|---|---|
-| ![Embody Mode: the robot's face with a speech bubble](screenshots/face.jpg) | ![Embody Mode: the QR screen with the pairing code](screenshots/qr-screen.jpg) |
+| The face, while a browser drives it | The QR screen: scan to pair, or type the code | The Manager screen (the QR screen's gear) |
+|---|---|---|
+| ![Embody Mode: the robot's face with a speech bubble](screenshots/face.jpg) | ![Embody Mode: the QR screen with the pairing code and the gear](screenshots/qr-screen.jpg) | ![Embody Mode: the Manager screen with its page's QR code, Turn off and Use sm test](screenshots/manager-screen.jpg) |
 
-Both are the robot's own screen (320x240), taken with the `screen_snapshot` command. The
-QR screen's buttons are described under [Servers](#servers).
+All three are the robot's own screen (320x240), taken over USB (`s-w42-eu-usb screenshot`, with
+placeholder addresses). The QR screen's buttons are described under [Servers](#servers), the
+Manager screen's there too and under [The manager channel](#the-manager-channel).
 
 ## On the robot
 
@@ -74,6 +75,8 @@ A computer writes servers, their tokens, autostart and Wi-Fi into the robot's se
   - `{"op":"tap","x","y","ms"?}`: a touch through a virtual pointer (100 ms, or longer for a long press). The first tap asks on the screen **"Let the computer on USB use the screen?"**; the Yes is kept in NVS (`embody/usb_ctrl`) until no USB host is there for a few seconds (the cable is unplugged). Taps are refused while one of the robot's own questions is open, and a press in progress is released when one opens: **only the person at the robot answers them.**
   - `{"op":"launch","app"}`: restart into a launcher app once (`"launcher"`: none); an unknown name answers with the list of apps.
   - `{"op":"stall","seconds"}`: the app loop stops for 1..120 s, as if it hung (tests of the manager channel's "not responding" and Restart).
+  - `{"op":"swipe","x0","y0","x1","y1","ms"}`: a finger's swipe (from the bottom edge up: the swipe-up bar); `{"op":"screenshot","layer":"top"}`: the top layer (the robot's questions, the bar).
+  - **Test builds only** (`./container.sh test`, option `STACKCHAN_EMBODY_TEST_TAPS`; never released): control over USB needs no Yes, and taps may answer the robot's own questions, so a program can test every screen end to end.
 
 ## The manager channel
 

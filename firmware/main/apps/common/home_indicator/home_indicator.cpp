@@ -21,6 +21,8 @@ using namespace smooth_ui_toolkit::lvgl_cpp;
  * @brief
  *
  */
+static lv_indev_t* s_extra_indev = nullptr;  // set_home_gesture_extra_indev
+
 class HomeGesture {
 public:
     std::function<void(void)> onGesture;
@@ -38,9 +40,11 @@ public:
         _swipe_min_dist   = 50;  // 向上滑动至少 50 像素才触发
     }
 
+    lv_indev_t* source = nullptr;  // nullptr: the touch screen; else another pointer (automation)
+
     void update()
     {
-        lv_indev_t* indev = GetHAL().lvTouchpad;
+        lv_indev_t* indev = source ? source : GetHAL().lvTouchpad;
         if (!indev) {
             return;
         }
@@ -270,6 +274,15 @@ public:
     void update()
     {
         _home_gesture->update();
+        if (s_extra_indev && (!_extra_gesture || _extra_gesture->source != s_extra_indev)) {
+            _extra_gesture            = std::make_unique<HomeGesture>();
+            _extra_gesture->source    = s_extra_indev;
+            _extra_gesture->onGesture = [&]() { handle_home_gesture(); };
+            _extra_gesture->init();
+        }
+        if (_extra_gesture) {
+            _extra_gesture->update();
+        }
         _home_button->update();
         update_home_button_visibility();
         check_go_home();
@@ -277,6 +290,7 @@ public:
 
 private:
     std::unique_ptr<HomeGesture> _home_gesture;
+    std::unique_ptr<HomeGesture> _extra_gesture;  // the swipe from another pointer (automation)
     std::unique_ptr<HomeButton> _home_button;
     uint32_t _button_show_tick = 0;
     bool _is_first_show        = true;
@@ -358,6 +372,11 @@ void set_home_indicator_extra_text(const char* text)
 void destroy_home_indicator()
 {
     _home_indicator.reset();
+}
+
+void set_home_gesture_extra_indev(lv_indev_t* indev)
+{
+    s_extra_indev = indev;
 }
 
 }  // namespace view

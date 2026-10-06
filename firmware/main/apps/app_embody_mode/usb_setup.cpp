@@ -5,6 +5,7 @@
  */
 #include "usb_setup.h"
 #include "managers.h"
+#include "../common/home_indicator/home_indicator.h"
 #include "automation.h"
 #include "confirm_dialog.h"
 #include <hal/hal.h>
@@ -150,11 +151,29 @@ static std::atomic<int> s_tap_x{0}, s_tap_y{0};
 static std::atomic<uint32_t> s_tap_until{0};
 static lv_indev_t* s_usb_pointer = nullptr;
 
+// A swipe: from (x0, y0) to (x1, y1) between s_swipe_start and s_tap_until (LVGL ticks).
+static std::atomic<int> s_swipe_x0{0}, s_swipe_y0{0}, s_swipe_x1{0}, s_swipe_y1{0};
+static std::atomic<uint32_t> s_swipe_start{0};
+static std::atomic<bool> s_swiping{false};
+
+#if CONFIG_STACKCHAN_EMBODY_TEST_TAPS
+static constexpr bool _test_taps = true;  // tests only: taps reach the robot's questions too
+#else
+static constexpr bool _test_taps = false;
+#endif
+
 static void usb_pointer_read(lv_indev_t*, lv_indev_data_t* data)
 {
-    data->point.x = s_tap_x;
-    data->point.y = s_tap_y;
-    const bool pressed = (int32_t)(s_tap_until.load() - lv_tick_get()) > 0 && !embody::questionOpen();
+    const uint32_t now = lv_tick_get();
+    data->point.x      = s_tap_x;
+    data->point.y      = s_tap_y;
+    if (s_swiping) {
+        const uint32_t len = std::max<uint32_t>(1, s_tap_until - s_swipe_start);
+        const float f      = std::clamp((float)(now - s_swipe_start) / (float)len, 0.0f, 1.0f);
+        data->point.x      = (int)(s_swipe_x0 + (s_swipe_x1 - s_swipe_x0) * f);
+        data->point.y      = (int)(s_swipe_y0 + (s_swipe_y1 - s_swipe_y0) * f);
+    }
+    const bool pressed = (int32_t)(s_tap_until.load() - now) > 0 && (_test_taps || !embody::questionOpen());
     data->state = pressed ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
 }
 
@@ -163,6 +182,9 @@ static void usb_pointer_read(lv_indev_t*, lv_indev_data_t* data)
 // robot) and ends when the USB host goes away (the cable is unplugged).
 static bool usb_control_allowed()
 {
+    if (_test_taps) {
+        return true;  // tests only (./container.sh test): no Yes for control over USB
+    }
     Settings settings("embody", false);
     return settings.GetBool("usb_ctrl", false);
 }
@@ -183,7 +205,9 @@ static void tap(ArduinoJson::JsonDocument& res, int x, int y, int ms)
             lv_indev_set_type(s_usb_pointer, LV_INDEV_TYPE_POINTER);
             lv_indev_set_read_cb(s_usb_pointer, usb_pointer_read);
             lv_indev_set_display(s_usb_pointer, lv_display_get_default());
+            view::set_home_gesture_extra_indev(s_usb_pointer);  // its swipe up opens the bar too
         }
+        s_swiping   = false;
         s_tap_x     = x;
         s_tap_y     = y;
         s_tap_until = lv_tick_get() + (uint32_t)ms;
@@ -192,13 +216,32 @@ static void tap(ArduinoJson::JsonDocument& res, int x, int y, int ms)
     res["ok"] = true;
 }
 
+// A swipe from (x0, y0) to (x1, y1) in ms (e.g. up from the bottom edge: the swipe-up bar).
+static void swipe(ArduinoJson::JsonDocument& res, int x0, int y0, int x1, int y1, int ms)
+{
+    tap(res, x0, y0, 0);  // creates the pointer if needed
+    {
+        LvglLockGuard lock;
+        s_swipe_x0 = x0, s_swipe_y0 = y0, s_swipe_x1 = x1, s_swipe_y1 = y1;
+        s_tap_x = x1, s_tap_y = y1;
+        s_swipe_start = lv_tick_get();
+        s_tap_until   = s_swipe_start + (uint32_t)ms;
+        s_swiping     = true;
+    }
+    vTaskDelay(pdMS_TO_TICKS(ms + 150));
+    s_swiping = false;
+    res["ok"] = true;
+}
+
+static bool s_shot_top = false;  // {"layer": "top"}: the top layer (the robot's questions)
+
 // The active screen as a JPEG, base64 (questions on the top layer are not in it: "question").
 static bool screenshot(ArduinoJson::JsonDocument& res)
 {
     lv_draw_buf_t* snap = nullptr;
     {
         LvglLockGuard lock;
-        snap = lv_snapshot_take(lv_screen_active(), LV_COLOR_FORMAT_RGB565);
+        snap = lv_snapshot_take(s_shot_top ? lv_layer_top() : lv_screen_active(), LV_COLOR_FORMAT_RGB565);
     }
     if (!snap) {
         mclog::tagWarn(_tag, "screenshot: no snapshot");
@@ -307,6 +350,9 @@ static void handle(const std::string& json)
         }
 #if CONFIG_STACKCHAN_EMBODY_AUTOMATION
         res["automation"] = true;
+        if (_test_taps) {
+            res["test_taps"] = true;  // a test build: never released
+        }
 #else
         res["automation"] = false;
 #endif
@@ -480,7 +526,7 @@ static void handle(const std::string& json)
             y >= (int)lv_display_get_vertical_resolution(nullptr)) {
             return reply_error("x or y outside the screen");
         }
-        if (embody::questionOpen()) {
+        if (embody::questionOpen() && !_test_taps) {
             return reply_error("a question is on the robot's screen: only a person at the robot may answer it");
         }
         if (!usb_control_allowed()) {
@@ -497,6 +543,14 @@ static void handle(const std::string& json)
         mclog::tagInfo(_tag, "tap over USB at {},{} for {} ms", x, y, ms);
         return reply(res);
     }
+    if (op == "swipe") {  // {"x0","y0","x1","y1","ms"?}: like a finger, e.g. up from the bottom edge
+        if (!usb_control_allowed()) {
+            return reply_error("not allowed on the robot: tap once first (it asks)");
+        }
+        swipe(res, req["x0"] | 160, req["y0"] | 236, req["x1"] | 160, req["y1"] | 150, std::clamp(req["ms"] | 300, 50, 2000));
+        mclog::tagInfo(_tag, "swipe over USB");
+        return reply(res);
+    }
     if (op == "stall") {  // {"seconds": 1..120}: the app loop stops (tests of the manager channel)
         const int seconds = std::clamp(req["seconds"] | 30, 1, 120);
         s_stall           = seconds;
@@ -505,7 +559,8 @@ static void handle(const std::string& json)
         return reply(res);
     }
     if (op == "screenshot") {
-        mclog::tagInfo(_tag, "screenshot over USB");
+        s_shot_top = std::string(req["layer"] | "") == "top";
+        mclog::tagInfo(_tag, "screenshot over USB{}", s_shot_top ? " (top layer)" : "");
         if (!screenshot(res)) {
             return reply_error("screenshot failed");
         }
