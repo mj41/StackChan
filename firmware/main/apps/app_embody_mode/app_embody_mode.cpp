@@ -499,6 +499,13 @@ void AppEmbodyMode::onRunning()
     }
     render_server_row();
     update_manager_screen();
+    // The QR or Manager screen open: the app is paused (no input events or input streams; its
+    // commands still run behind). It hears "paused" and "resumed".
+    if (const bool paused = _qr_visible || _mgr_show; paused != _input_paused) {
+        _input_paused = paused;
+        queue_event(paused ? "paused" : "resumed", {}, {{"by", _mgr_show ? "manager" : "qr"}});
+        mclog::tagInfo(_tag, "app {}", paused ? "paused (the robot's own screen is open)" : "resumed");
+    }
     update_motion();
     update_hold();
     if (_rotate_until && (int32_t)(GetHAL().millis() - _rotate_until) >= 0) {
@@ -1058,8 +1065,26 @@ void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
     }
 }
 
+// The robot's inputs: while its own screens (QR, Manager) are open, the app does not get them.
+static bool is_input_event(const char* name)
+{
+    static const char* inputs[] = {"head_press",   "head_release",   "head_swipe_forward", "head_swipe_backward",
+                                   "touch_down",   "touch_up",       "screen_tap",         "screen_long_press",
+                                   "shake",        "pickup",         "proximity_near",     "proximity_far",
+                                   "nfc_tag",      "nfc_removed",    "ir_received",        "power_button"};
+    for (const char* i : inputs) {
+        if (std::strcmp(name, i) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void AppEmbodyMode::queue_event(const char* name, embody::Client::Telemetry data, embody::Client::Texts text)
 {
+    if (_input_paused && is_input_event(name)) {
+        return;  // the robot's own screen has the person's attention, not the app
+    }
     std::lock_guard<std::mutex> lock(_event_mutex);
     if (_pending_events.size() < 16) {
         _pending_events.push_back({name, std::move(data), std::move(text)});
@@ -2000,7 +2025,9 @@ void AppEmbodyMode::update_light()
         msg.push_back((char)(_light_sample_count & 0xFF));
         msg.push_back((char)(_light_sample_count >> 8));
         msg += _light_samples;
-        _client->sendBinary(_bin_light, (const uint8_t*)msg.data(), msg.size());
+        if (!_input_paused) {
+            _client->sendBinary(_bin_light, (const uint8_t*)msg.data(), msg.size());
+        }
         _light_samples.clear();
         _light_sample_count = 0;
     }
@@ -2283,7 +2310,9 @@ void AppEmbodyMode::update_touch()
         msg.push_back((char)(_touch_frame_count & 0xFF));
         msg.push_back((char)(_touch_frame_count >> 8));
         msg += _touch_frames;
-        _client->sendBinary(_bin_touch, (const uint8_t*)msg.data(), msg.size());
+        if (!_input_paused) {  // touches on the robot's own screen are not the app's
+            _client->sendBinary(_bin_touch, (const uint8_t*)msg.data(), msg.size());
+        }
         _touch_frames.clear();
         _touch_frame_count = 0;
     }
@@ -2302,7 +2331,7 @@ void AppEmbodyMode::send_imu_stream()
     _last_imu_send = now;
     std::vector<ImuStreamSample_t> samples;
     GetHAL().takeImuStream(samples);
-    if (samples.empty()) {
+    if (samples.empty() || _input_paused) {
         return;
     }
     std::string msg;

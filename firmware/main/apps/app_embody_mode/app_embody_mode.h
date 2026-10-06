@@ -104,6 +104,7 @@ private:
     lv_obj_t* _mgr_second = nullptr;
     std::string _mgr_qr_text;
     bool _mgr_show = false;
+    std::atomic<bool> _input_paused{false};  // the QR or Manager screen is open: no inputs to the app
     std::atomic<bool> _mgr_use_second{false};
     lv_obj_t* _mgr_toggle_btn = nullptr;  // "Turn off" / "Turn on"
     std::atomic<int> _mgr_toggle{0};      // 7: off, 8: on, asked on the screen
