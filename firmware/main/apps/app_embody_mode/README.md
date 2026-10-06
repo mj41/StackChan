@@ -11,7 +11,7 @@ Launcher app (first icon) that lets you control this Stackchan from a browser th
 > **Want more?** Ask in the [issues](https://github.com/mj41/home-w42-eu/issues), and ideally [sponsor mj41](https://github.com/sponsors/mj41) on GitHub:
 > mj41 codes for attention food.
 
-| The face, while a browser drives it | The QR screen: scan to pair, or type the code | The Manager screen (the QR screen's gear) |
+| The face, while a browser drives it | The app switcher (the QR screen): scan to pair, Next and Connect to switch apps | The Manager screen (the app switcher's gear) |
 |---|---|---|
 | ![Embody Mode: the robot's face with a speech bubble](screenshots/face.jpg) | ![Embody Mode: the QR screen with the pairing code and the gear](screenshots/qr-screen.jpg) | ![Embody Mode: the Manager screen with its page's QR code, Turn off and Use sm test](screenshots/manager-screen.jpg) |
 
@@ -19,10 +19,22 @@ All three are the robot's own screen (320x240), taken over USB (`s-w42-eu-usb sc
 placeholder addresses). The QR screen's buttons are described under [Servers](#servers), the
 Manager screen's there too and under [The manager channel](#the-manager-channel).
 
+## How the pieces fit
+
+| Piece | What it is | Needed? |
+|---|---|---|
+| **Robot** | a Stackchan with the Embody Mode firmware (this one). On its screen the **app switcher** (the QR screen: Next, Connect) lists its apps and switches between them; its gear opens the **Manager screen** (which manager it has, turn it off or on). | yes |
+| **Apps** | servers the robot connects to, one at a time: [Raw data](https://github.com/mj41/s-w42-eu-raw), [Pet](https://github.com/mj41/s-w42-eu-pet), [Sbot](https://github.com/mj41/s-w42-eu-sbot), … | at least one |
+| **Phone or browser** | opens an app's page and pairs with the robot by scanning its QR code; with end-to-end encryption only paired browsers can read the robot | to use an app |
+| **Manager** | [s-w42-eu-manager](https://github.com/mj41/s-w42-eu-manager): the web service that sets robots up over USB, gives each robot its own token per app, and switches and changes apps from its page; on your own computer (the home manager) or online at [sm.w42.eu](https://sm.w42.eu), which a home manager may link to | optional: without it, apps are written over USB and switched on the robot's app switcher |
+
+"Manager" always means this web service; on the robot there is only the app switcher and the
+Manager screen that shows which manager it has.
+
 ## On the robot
 
 1. **Wi-Fi:** opening the app starts Wi-Fi (loading page) and connects to the default server in its list ([Servers](#servers)). Without a server set up (the release firmware before its setup over USB), it shows "Set up: sm.w42.eu" and contacts nothing, not even Wi-Fi.
-2. **QR code:** the screen shows the server's one-time pairing URL as a QR code, next to its 8-character code.
+2. **App switcher (the QR screen):** the screen shows the app's one-time pairing URL as a QR code, next to its 8-character code; Next and Connect switch to another app ([Servers](#servers)).
 3. **Face:** once a browser pairs, the face appears.
    - **Tap:** sends a `screen_tap` event with x/y.
    - **Long press:** reported as `screen_long_press {x, y}` (free for apps).
@@ -43,7 +55,7 @@ Manager screen's there too and under [The manager channel](#the-manager-channel)
 
 The robot keeps a **server list** in NVS (namespace `embody`): the built-in server from Kconfig (always first; empty in the release build), its **manager's** apps (a Stackchan manager: set up over USB, changed later online by signed messages on the manager channel, below), and servers written **over USB** without a manager. **Apps never change the list:** adding, removing and the start app are the manager's (and the person's at the robot, on the QR screen). Tokens stay on the robot; the `servers` event (sent after registering and on every change) lists names, URLs, origins and whether there is a token.
 
-- **QR screen:** swipe up from the bottom; next to Home, **QR** opens it, and while it is open that button reads **APP** and goes back to the app. The top row is `Pin  name n/m  Next ▶`; the bottom-right button reads **Back to app** on the connected server and **Connect** on another one.
+- **App switcher (the QR screen):** swipe up from the bottom; next to Home, **QR** opens it, and while it is open that button reads **APP** and goes back to the app. The top row is `Pin  name n/m  Next ▶`; the bottom-right button reads **Back to app** on the connected server and **Connect** on another one.
   - **Next** browses the list; the connection stays, and another server's code comes only after Connect.
   - **Connect** switches to the shown server: the robot reconnects and, once connected, goes back to that app's face (its QR code: the QR button). The `n/m` counts only real apps (the release's empty "Set up" entry is skipped while there are others).
   - **Each app starts clean:** on every switch to another app the robot goes back to its defaults (`reset_for_app`): sprites and picture gone, the neutral face, LEDs off, camera, microphone and every stream off, no sound, no rotation or hold, the head forward and powered, proximity and auto-brightness on, the screen on, NFC on, the volume it started with (an app cannot clear what the last one did when its traffic is end-to-end encrypted). App lists from the managers are applied in the same locked part of the loop as commands (they may ask on the screen).
@@ -51,8 +63,8 @@ The robot keeps a **server list** in NVS (namespace `embody`): the built-in serv
   - **Which app runs:** after every connection the app's name shows as a card at the top for 2.5 s, then as a small label in the top-right corner (hidden on the QR screen and a blank screen), so apps that use the robot's own face (Raw data, Sbot) can be told apart.
   - **Pin** makes the shown one the **default** used at start (blue); tapping Pin on the default **unpins** it.
   - With no default, Embody Mode starts as a **chooser**: it contacts nothing until Connect.
-- **Apps are separate:** an app never adds or removes the robot's apps; USB or the robot's manager does. Switching is always possible here, on the QR screen.
-- **Manager screen:** the gear on the QR screen: the robot's manager, its channel connected or not, the address of the manager's page as text and a QR code (with a one-time code while connected: a phone that scans it is signed in at a home manager), **Turn off / Turn on** (asked on the screen: off, the robot keeps no connection to its manager and its apps change only over USB; the manager can turn itself off for the robot, never on), and **Use ‹the second manager›** when the USB setup allowed it ("Make … this robot's manager?", Yes): the two swap, and the channel goes to the new one; the robot's apps stay until it sends its own. **Back** closes it.
+- **Apps are separate:** an app never adds or removes the robot's apps; USB or the robot's manager does. Switching is always possible here, on the app switcher.
+- **Manager screen:** the gear on the app switcher: the robot's manager, its channel connected or not, the address of the manager's page as text and a QR code (with a one-time code while connected: a phone that scans it is signed in at a home manager), **Turn off / Turn on** (asked on the screen: off, the robot keeps no connection to its manager and its apps change only over USB; the manager can turn itself off for the robot, never on), and **Use ‹the second manager›** when the USB setup allowed it ("Make … this robot's manager?", Yes): the two swap, and the channel goes to the new one; the robot's apps stay until it sends its own. **Back** closes it.
 - **From a browser:** `server_switch {server: url or name}` only (an app may suggest another app). It is **asked on the robot's screen first** ("Connect to …?", 60 s; events `server_asking`, then `server_refused` without a Yes), as a manager's new start app is ("Start with …?"); the QR screen's own buttons need no question.
 - **On the QR screen,** the card shows the shown server's address, whether it is on the local network or the internet, and whether the connection is encrypted (TLS).
 

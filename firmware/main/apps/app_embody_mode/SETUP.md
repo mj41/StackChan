@@ -52,7 +52,7 @@ token of its own, and the Wi-Fi, into the robot, and restarts it into Embody Mod
 asks on its screen before the app it starts with is set (tap **Yes**). It takes about two
 minutes. Then:
 
-- The robot connects to its start app; Next and Connect on its QR screen switch between your
+- The robot connects to its start app; Next and Connect on its app switcher (the QR screen) switch between your
   apps. It is **private**: only you, signed in, see it. Open the app (e.g.
   [raw.sa.w42.eu](https://raw.sa.w42.eu)) on any device where you sign in, and it is there.
 - Without Wi-Fi in step 4, the robot opens a hotspot first ([First start](#first-start)).
@@ -247,14 +247,14 @@ On the robot:
 The robot keeps a **list of servers** (its apps), set by its manager, and can switch between
 them:
 
-- **On the robot:** open the QR screen (swipe up, **QR**). **Next** shows the next server,
+- **On the robot:** open the app switcher (swipe up, **QR**). **Next** shows the next server,
   **Connect** switches to it, **Pin** makes the shown one the default at start.
 - **More apps** come from the manager's catalog: add an app to your manager's
   `~/.config/s-w42-eu-manager/apps.json` and set the robot up again (B), or change its apps
   online on the manager's page (if you allowed that at setup).
 - **Apps are separate:** apps never add or remove the robot's apps; USB or its manager does,
-  and you can always switch apps on the robot's QR screen.
-- **The manager is optional:** QR screen → gear → **Turn off**: then apps change only over USB.
+  and you can always switch apps on the robot's app switcher.
+- **The manager is optional:** app switcher → gear → **Turn off**: then apps change only over USB.
   **Turn on** there, or a USB setup, turns it on again (the manager can turn itself off, never
   on). The gear's QR code opens your home manager's page on a phone (it signs the phone in).
 - **One manager:** the one that set the robot up last over USB (A: sm.w42.eu, or B: your

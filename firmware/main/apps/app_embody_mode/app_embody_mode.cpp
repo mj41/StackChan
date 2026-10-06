@@ -2740,7 +2740,7 @@ void AppEmbodyMode::update_manager_screen()
             const std::string n = m.name.empty() ? "the manager" : m.name;
             embody::askOnScreen(_mgr_toggle_on ? "Turn " + n + " on?" : "Turn " + n + " off?",
                                 _mgr_toggle_on ? n + " may then change this robot's apps and switch them (as set up over USB)."
-                                               : "Apps then come and go only over USB; switch apps on the QR screen. "
+                                               : "Apps then come and go only over USB; switch apps on the app switcher. "
                                                  "On again here, or with a USB setup.",
                                 60, [answer = _mgr_toggle_answer](bool yes) { *answer = yes ? 1 : -1; });
         }
