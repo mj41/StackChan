@@ -323,6 +323,8 @@ void AppEmbodyMode::onRunning()
             _mgr_show = false;
         } else if (nav == 6) {  // its "Use <the second manager>"
             _mgr_use_second = true;
+        } else if (nav == 7 || nav == 8) {  // its "Turn manager off" / "Turn manager on"
+            _mgr_toggle = nav;
         } else if (_servers.size() > 1) {  // Next: only browse, the connection stays
             // The release's empty "Set up: sm.w42.eu" entry only while there is nothing else.
             for (size_t i = 0; i < _servers.size(); i++) {
@@ -897,12 +899,15 @@ void AppEmbodyMode::render()
         changed         = true;
     }
     if (_toggle_qr_requested.exchange(false) && (!_client || _client->isRegistered())) {
-        _qr_visible = !_qr_visible;
+        // APP from the QR screen or the Manager screen on top of it: back to the app.
+        _qr_visible = _mgr_show ? false : !_qr_visible;
+        _mgr_show   = false;
         changed     = true;
     }
     if (_qr_hide_requested.exchange(false) && _qr_visible) {
         _qr_visible = false;
         _qr_pinned  = false;
+        _mgr_show   = false;
         changed     = true;
     }
     if (changed) {
@@ -2690,6 +2695,33 @@ void AppEmbodyMode::update_manager_screen()
                                 60, [answer = _mgr_answer](bool yes) { *answer = yes ? 1 : -1; });
         }
     }
+    // The manager on or off, asked on the screen: off, apps change only over USB and switches
+    // happen on the QR screen; on again only here or over USB.
+    if (const int t = _mgr_toggle.exchange(0); t && !_mgr_toggle_answer) {
+        const auto m = embody::loadManager("manager");
+        if (m.valid()) {
+            _mgr_toggle_on      = t == 8;
+            _mgr_toggle_answer  = std::make_shared<std::atomic<int>>(0);
+            const std::string n = m.name.empty() ? "the manager" : m.name;
+            embody::askOnScreen(_mgr_toggle_on ? "Turn " + n + " on?" : "Turn " + n + " off?",
+                                _mgr_toggle_on ? n + " may then change this robot's apps and switch them (as set up over USB)."
+                                               : "Apps then come and go only over USB; switch apps on the QR screen. "
+                                                 "On again here, or with a USB setup.",
+                                60, [answer = _mgr_toggle_answer](bool yes) { *answer = yes ? 1 : -1; });
+        }
+    }
+    if (_mgr_toggle_answer && *_mgr_toggle_answer != 0) {
+        const bool yes = *_mgr_toggle_answer == 1;
+        _mgr_toggle_answer.reset();
+        if (yes) {
+            const bool on = _mgr_toggle_on;
+            embody::updateManager("manager", [on](embody::Manager& cur) { cur.enabled = on; });
+            on ? _channel.reconnect() : _channel.turnOff();
+            queue_event(on ? "manager_on" : "manager_off");
+            mclog::tagInfo(_tag, "manager {} (on the screen)", on ? "on" : "off: USB only");
+        }
+        _mgr_rendered_at = 0;
+    }
     if (_mgr_answer && *_mgr_answer != 0) {
         const bool yes = *_mgr_answer == 1;
         _mgr_answer.reset();
@@ -2697,6 +2729,7 @@ void AppEmbodyMode::update_manager_screen()
         auto second = embody::loadManager("manager2");
         if (yes && second.valid() && second.mayPrimary) {
             first.mayPrimary = true;  // it may come back the same way
+            second.version   = 0;     // its list is not on the robot: it sends it when connected
             embody::saveManager("manager", second);
             embody::saveManager("manager2", first);
             _channel.reconnect();
@@ -2745,8 +2778,9 @@ void AppEmbodyMode::update_manager_screen()
         _mgr_panel->setPadding(0, 0, 0, 0);
         _mgr_panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t* p = _mgr_panel->get();
-        lv_obj_t* t = label(p, &lv_font_montserrat_20, _color_text, 12, 14, 200);
+        lv_obj_t* t = label(p, &lv_font_montserrat_20, _color_text, 12, 14, 110);
         lv_label_set_text(t, "Manager");
+        _mgr_toggle_btn = button(p, "", 122, 4, 100, 7);
         button(p, "Back", 226, 4, 88, 5);
         _mgr_name  = label(p, &lv_font_montserrat_20, _color_text, 12, 52, 300);
         _mgr_state = label(p, &lv_font_montserrat_16, _color_muted, 12, 80, 300);
@@ -2785,19 +2819,29 @@ void AppEmbodyMode::update_manager_screen()
         lv_label_set_text(_mgr_page, "");
         lv_obj_add_flag(_mgr_qr, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(_mgr_second, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_add_flag(_mgr_toggle_btn, LV_OBJ_FLAG_HIDDEN);
         return;
     }
     lv_label_set_text(_mgr_name, m.name.empty() ? m.id.c_str() : m.name.c_str());
     const std::string err = _channel.lastError();
-    lv_label_set_text(_mgr_state, _channel.connected() ? LV_SYMBOL_OK " connected" : ("not connected" + (err.empty() ? "" : ": " + err)).c_str());
+    lv_label_set_text(_mgr_state, !m.enabled ? "off: apps over USB only, switch on the QR screen"
+                                  : _channel.connected() ? LV_SYMBOL_OK " connected"
+                                                         : ("not connected" + (err.empty() ? "" : ": " + err)).c_str());
+    lv_label_set_text(lv_obj_get_child(_mgr_toggle_btn, 0), m.enabled ? "Turn off" : "Turn on");
+    lv_obj_set_user_data(_mgr_toggle_btn, (void*)(intptr_t)(m.enabled ? 7 : 8));
+    lv_obj_remove_flag(_mgr_toggle_btn, LV_OBJ_FLAG_HIDDEN);
+    // The QR signs a phone in at a home manager (a one-time code, while connected); the text is
+    // the plain address.
     const std::string page = m.page.empty() ? m.url : m.page;
-    if (page != _mgr_qr_text) {
-        _mgr_qr_text = page;
-        lv_qrcode_update(_mgr_qr, page.data(), page.size());
-        lv_label_set_text(_mgr_page, ("Its page:\n" + page).c_str());
+    const std::string code = m.enabled ? _channel.pageUrl() : "";
+    const std::string qr   = code.empty() ? page : code;
+    if (qr != _mgr_qr_text) {
+        _mgr_qr_text = qr;
+        lv_qrcode_update(_mgr_qr, qr.data(), qr.size());
+        lv_label_set_text(_mgr_page, ((code.empty() ? "Its page:\n" : "Scan to open it here:\n") + page).c_str());
     }
     lv_obj_remove_flag(_mgr_qr, LV_OBJ_FLAG_HIDDEN);
-    if (second.valid() && second.mayPrimary) {
+    if (second.valid() && second.mayPrimary && m.enabled) {
         lv_label_set_text(lv_obj_get_child(_mgr_second, 0), ("Use " + second.name).c_str());
         lv_obj_remove_flag(_mgr_second, LV_OBJ_FLAG_HIDDEN);
     } else {

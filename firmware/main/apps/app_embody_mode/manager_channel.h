@@ -35,6 +35,8 @@ public:
     void start(const std::string& robotId);
     // The primary changed (USB setup, Manager screen): connect anew.
     void reconnect() { _reconnect = true; }
+    // Turned off on the Manager screen (already saved): tell the manager, close.
+    void turnOff() { _off = true; }
     // The app loop is alive: call every loop.
     void beat();
     // What the app loop reports: state (a JSON object: app, app_name, conn, question, answer,
@@ -43,26 +45,30 @@ public:
     bool pop(Message& out);
 
     bool connected() const { return _connected; }
+    // The manager page's one-time sign-in address (PageCode) for the Manager screen's QR: a phone
+    // that scans it is signed in at that manager ("" for none).
+    std::string pageUrl() const;
     std::string lastError() const;
 
 private:
     std::string _robot_id;
     std::atomic<bool> _connected{false};
     std::atomic<bool> _reconnect{false};
+    std::atomic<bool> _off{false};  // turned off on the robot: say so, then close
     std::atomic<int64_t> _beat_us{0};
     std::atomic<int64_t> _last_rx{0};  // the socket's callbacks: members, they may run as it closes
     std::atomic<bool> _closed{false};
     bool _started = false;
 
     mutable std::mutex _mu;
-    std::string _state, _apps, _sent, _error;
+    std::string _state, _apps, _sent, _apps_sent, _error, _page_url;
     std::deque<std::string> _inbox;  // raw frames from the socket
     std::deque<Message> _out;        // checked messages for the app loop
 
     static void task_entry(void* self);
     void run();
     void session();
-    void handle(const std::string& frame);
+    bool handle(const std::string& frame);  // true: the manager turned itself off (Disable)
     std::string state_json(bool hello, bool stuck);
 };
 

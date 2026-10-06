@@ -31,6 +31,9 @@ struct Manager {
     bool remote     = true;   // it may change the apps and switch them (else only USB)
     bool askPin     = true;   // a switch or a new start app from it is asked on the screen
     bool mayPrimary = false;  // the second: may become the primary on the robot's screen
+    bool enabled    = true;   // off: no channel; apps change only over USB, switches on the QR
+                              // screen. Off on the Manager screen or by the manager (Disable);
+                              // on again only on the Manager screen or over USB.
 
     bool valid() const { return !id.empty() && !key.empty() && !url.empty(); }
 };

@@ -270,6 +270,7 @@ static void add_managers(ArduinoJson::JsonDocument& res)
         o["seq"]         = m.seq;
         o["remote_apps"] = m.remote;
         o["ask_pin"]     = m.askPin;
+        o["enabled"]     = m.enabled;
         if (slot[7] == '2') {
             o["may_primary"] = m.mayPrimary;
         }

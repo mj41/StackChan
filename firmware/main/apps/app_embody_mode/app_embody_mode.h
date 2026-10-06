@@ -105,6 +105,10 @@ private:
     std::string _mgr_qr_text;
     bool _mgr_show = false;
     std::atomic<bool> _mgr_use_second{false};
+    lv_obj_t* _mgr_toggle_btn = nullptr;  // "Turn off" / "Turn on"
+    std::atomic<int> _mgr_toggle{0};      // 7: off, 8: on, asked on the screen
+    bool _mgr_toggle_on = false;
+    std::shared_ptr<std::atomic<int>> _mgr_toggle_answer;
     std::shared_ptr<std::atomic<int>> _mgr_answer;
     uint32_t _mgr_rendered_at = 0;
     uint32_t _mgr_state_at = 0;

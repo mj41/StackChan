@@ -252,6 +252,11 @@ them:
 - **More apps** come from the manager's catalog: add an app to your manager's
   `~/.config/s-w42-eu-manager/apps.json` and set the robot up again (B), or change its apps
   online on the manager's page (if you allowed that at setup).
+- **Apps are separate:** apps never add or remove the robot's apps; USB or its manager does,
+  and you can always switch apps on the robot's QR screen.
+- **The manager is optional:** QR screen → gear → **Turn off**: then apps change only over USB.
+  **Turn on** there, or a USB setup, turns it on again (the manager can turn itself off, never
+  on). The gear's QR code opens your home manager's page on a phone (it signs the phone in).
 - **One manager:** the one that set the robot up last over USB (A: sm.w42.eu, or B: your
   own). The robot keeps a connection to it: its page shows the robot live (which app, a
   question on its screen and the answer) and switches it to any of its apps at once. The QR

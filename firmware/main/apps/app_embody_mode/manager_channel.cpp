@@ -60,6 +60,12 @@ bool ManagerChannel::pop(Message& out)
     return true;
 }
 
+std::string ManagerChannel::pageUrl() const
+{
+    std::lock_guard<std::mutex> lock(_mu);
+    return _connected ? _page_url : "";
+}
+
 std::string ManagerChannel::lastError() const
 {
     std::lock_guard<std::mutex> lock(_mu);
@@ -99,11 +105,12 @@ std::string ManagerChannel::state_json(bool hello, bool stuck)
     {
         std::lock_guard<std::mutex> lock(_mu);
         ArduinoJson::deserializeJson(doc, _state.empty() ? "{}" : _state);
-        if (hello) {
+        if (hello || _apps != _apps_sent) {  // on Hello, and whenever the list changed
             ArduinoJson::JsonDocument apps;
             if (!ArduinoJson::deserializeJson(apps, _apps.empty() ? "[]" : _apps)) {
                 doc["apps"] = apps;
             }
+            _apps_sent = _apps;
         }
     }
     doc["seq"]   = loadManager("manager").seq;
@@ -116,9 +123,10 @@ std::string ManagerChannel::state_json(bool hello, bool stuck)
 void ManagerChannel::session()
 {
     _reconnect = false;
+    _off       = false;
     const Manager m = loadManager("manager");
-    if (!m.valid() || m.token.empty()) {
-        vTaskDelay(pdMS_TO_TICKS(2000));  // no manager yet: a USB setup gives one
+    if (!m.valid() || m.token.empty() || !m.enabled) {
+        vTaskDelay(pdMS_TO_TICKS(2000));  // none yet (a USB setup gives one), or turned off
         return;
     }
     auto network = Board::GetInstance().GetNetwork();
@@ -168,7 +176,20 @@ void ManagerChannel::session()
                 frame = std::move(_inbox.front());
                 _inbox.pop_front();
             }
-            handle(frame);
+            if (handle(frame)) {
+                ws->Send("{\"kind\":\"Off\",\"body\":{\"by\":\"manager\"}}");
+                vTaskDelay(pdMS_TO_TICKS(300));
+                _connected = false;
+                mclog::tagInfo(_tag, "turned off by {}: apps change only over USB now", m.name);
+                return;
+            }
+        }
+        if (_off) {  // turned off on the robot's Manager screen
+            ws->Send("{\"kind\":\"Off\",\"body\":{\"by\":\"robot\"}}");
+            vTaskDelay(pdMS_TO_TICKS(300));
+            _connected = false;
+            mclog::tagInfo(_tag, "turned off on the robot");
+            return;
         }
         const bool stuck = now - _beat_us > _stuck_after_us;
         std::string st;
@@ -176,7 +197,12 @@ void ManagerChannel::session()
             std::lock_guard<std::mutex> lock(_mu);
             st = _state;
         }
-        if (st != _sent || stuck != stuck_sent) {  // something changed: tell the manager
+        bool apps_changed = false;
+        {
+            std::lock_guard<std::mutex> lock(_mu);
+            apps_changed = _apps != _apps_sent;
+        }
+        if (st != _sent || stuck != stuck_sent || apps_changed) {  // something changed: tell the manager
             {
                 std::lock_guard<std::mutex> lock(_mu);
                 _sent = st;
@@ -211,29 +237,42 @@ static bool b64decode(const std::string& in, std::string& out)
     return true;
 }
 
-// A frame from the manager: Signed frames are checked (key, robot, seq) and taken.
-void ManagerChannel::handle(const std::string& frame)
+// A frame from the manager: Signed frames are checked (key, robot, seq) and taken. True: the
+// manager turned itself off for this robot (Disable).
+bool ManagerChannel::handle(const std::string& frame)
 {
     ArduinoJson::JsonDocument doc;
-    if (ArduinoJson::deserializeJson(doc, frame) || std::string(doc["kind"] | "") != "Signed") {
-        return;
+    if (ArduinoJson::deserializeJson(doc, frame)) {
+        return false;
+    }
+    if (std::string(doc["kind"] | "") == "PageCode") {  // only an address on its manager's own page
+        const std::string url  = doc["body"]["url"] | "";
+        const std::string page = loadManager("manager").page;
+        if (!page.empty() && url.rfind(page + "/phone?code=", 0) == 0 && url.size() < 200) {
+            std::lock_guard<std::mutex> lock(_mu);
+            _page_url = url;
+        }
+        return false;
+    }
+    if (std::string(doc["kind"] | "") != "Signed") {
+        return false;
     }
     const std::string payloadB64 = doc["body"]["payload"] | "";
     const std::string sig        = doc["body"]["sig"] | "";
     std::string payload;
     if (!b64decode(payloadB64, payload)) {
-        return;
+        return false;
     }
     Manager m = loadManager("manager");
     if (!managerSigned(m.key, payload, sig)) {
         mclog::tagWarn(_tag, "refused: not signed by {}", m.name);
-        return;
+        return false;
     }
     ArduinoJson::JsonDocument p;
     if (ArduinoJson::deserializeJson(p, payload) || std::string(p["robot"] | "") != _robot_id ||
         std::string(p["manager"] | "") != m.id) {
         mclog::tagWarn(_tag, "refused: not for this robot");
-        return;
+        return false;
     }
     const int32_t seq      = p["seq"] | 0;
     const std::string kind = p["kind"] | "";
@@ -246,7 +285,11 @@ void ManagerChannel::handle(const std::string& frame)
     });
     if (!fresh) {
         mclog::tagWarn(_tag, "refused: seq {} not newer", seq);
-        return;
+        return false;
+    }
+    if (kind == "Disable") {  // it may turn itself off (never on: that is the robot's, or USB's)
+        updateManager("manager", [](Manager& cur) { cur.enabled = false; });
+        return true;
     }
     if (kind == "Restart") {  // here, not in the app loop: it may be the one that hangs
         mclog::tagWarn(_tag, "restart asked by {}", m.name);
@@ -255,10 +298,11 @@ void ManagerChannel::handle(const std::string& frame)
     }
     if (!m.remote) {
         mclog::tagWarn(_tag, "refused: {} changes go over USB only", kind);
-        return;
+        return false;
     }
     std::lock_guard<std::mutex> lock(_mu);
     _out.push_back({kind, payload});
+    return false;
 }
 
 }  // namespace embody

@@ -56,6 +56,7 @@ Manager loadManager(const char* slot)
     m.remote     = doc["remote"] | true;
     m.askPin     = doc["ask_pin"] | true;
     m.mayPrimary = doc["may_primary"] | false;
+    m.enabled    = doc["enabled"] | true;
     return m;
 }
 
@@ -74,6 +75,7 @@ void saveManager(const char* slot, const Manager& m)
     doc["remote"]      = m.remote;
     doc["ask_pin"]     = m.askPin;
     doc["may_primary"] = m.mayPrimary;
+    doc["enabled"]     = m.enabled;
     std::string json;
     ArduinoJson::serializeJson(doc, json);
     Settings settings("embody", true);
@@ -111,6 +113,7 @@ bool managerFromJson(ArduinoJson::JsonVariantConst o, Manager& m)
     m.remote     = o["remote_apps"] | true;
     m.askPin     = o["ask_pin"] | true;
     m.mayPrimary = o["may_primary"] | false;
+    m.enabled    = o["enabled"] | true;  // a USB setup turns it on, unless it says not to
     return m.url.rfind("ws://", 0) == 0 || m.url.rfind("wss://", 0) == 0;
 }
 
