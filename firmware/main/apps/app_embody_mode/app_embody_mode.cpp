@@ -2620,6 +2620,7 @@ void AppEmbodyMode::publish_status(uint32_t now)
     static const char* states[] = {"connecting", "registered", "offline", "rejected"};
     doc["server"]   = _servers[_server_index].url;
     doc["name"]     = _servers[_server_index].name;
+    doc["paused"]   = (bool)_input_paused;  // the QR or Manager screen is open: no inputs to the app
     doc["state"]    = _client ? states[(int)_client->state()] : "none";
     doc["status"]   = _client ? _client->statusText() : "";
     doc["qr"]       = _qr_visible;
