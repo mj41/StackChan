@@ -369,6 +369,11 @@ static void handle(const std::string& json)
         res["id"]         = id;
         res["model"]      = "stackchan-cores3";
         res["firmware"]   = embody::firmwareVersion();
+        res["reset"]      = embody::reset_reason();  // why this boot (tests: a crash shows here)
+        if (const std::string c = embody::last_crash(); !c.empty()) {
+            res["last_crash"] = c;
+            res["crashes"]    = embody::crash_total();  // since power-on
+        }
         res["protocol"]   = 1;
         {
             Settings settings("embody", false);

@@ -26,6 +26,11 @@ inline constexpr int kMaxCrashRestarts = 3;
 void note_boot();
 int crash_restarts();
 void mark_stable();
+// For hello over USB: why this boot happened, and the last crash since power-on (RTC memory:
+// it survives the restarts after it) and how many there were.
+std::string reset_reason();
+std::string last_crash();
+int crash_total();
 
 inline constexpr const char* kEmbodyAppName = "Embody Mode";
 inline constexpr const char* kLauncherName  = "launcher";

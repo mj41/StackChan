@@ -5,6 +5,7 @@
  */
 #include "manager_channel.h"
 #include "managers.h"
+#include "automation.h"
 #include <board.h>
 #include <web_socket.h>
 #include <mooncake_log.h>
@@ -323,6 +324,7 @@ bool ManagerChannel::handle(const std::string& frame)
     }
     if (kind == "Restart") {  // here, not in the app loop: it may be the one that hangs
         mclog::tagWarn(_tag, "restart asked by {}", m.name);
+        embody::set_launch_once(embody::kEmbodyAppName);  // back into Embody Mode, not the launcher
         vTaskDelay(pdMS_TO_TICKS(300));
         esp_restart();
     }

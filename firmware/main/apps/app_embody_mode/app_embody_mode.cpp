@@ -58,14 +58,20 @@ static std::string host_of(const std::string& url)
     return url.substr(start, url.find_first_of(":/", start) - start);
 }
 
+// A server URL's host with its port, if any ("raw.sa.w42.eu", "192.168.1.10:8765").
+static std::string host_port(const std::string& url)
+{
+    auto start = url.find("://");
+    start      = start == std::string::npos ? 0 : start + 3;
+    return url.substr(start, url.find('/', start) - start);
+}
+
 // What a server is, for the QR screen's card while browsing: its address, whether it is on the
 // local network (private IPv4 ranges, .local, localhost) or the internet, and whether the
 // connection is encrypted (wss: TLS).
 static std::string server_details(const std::string& url)
 {
-    auto start = url.find("://");
-    start      = start == std::string::npos ? 0 : start + 3;
-    const std::string hostport = url.substr(start, url.find('/', start) - start);  // with the port
+    const std::string hostport = host_port(url);
     const std::string host     = host_of(url);
     unsigned a = 0, b = 0, c = 0, d = 0;
     bool local = host == "localhost" || (host.size() > 6 && host.compare(host.size() - 6, 6, ".local") == 0);
@@ -966,7 +972,15 @@ void AppEmbodyMode::render()
     // Show the code in two groups of four so it is easy to read out
     const auto& code = _client->pairCode();
     _code->setText(code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code);
-    _detail->setText(_last_command.empty() ? "" : "Last: " + _last_command);
+    // The app's server, so you know which one this is (E2E: end-to-end encrypted, TLS: wss).
+    const std::string& surl = _servers[_server_index].url;
+    std::string where       = host_port(surl);
+    if (is_e2e(surl) && _e2e_ok) {
+        where += " E2E";
+    } else if (surl.rfind("wss://", 0) == 0) {
+        where += " TLS";
+    }
+    _detail->setText(_last_command.empty() ? where : where + "\nLast: " + _last_command);
 }
 
 // Sensor values for the 2 s telemetry. Runs in the app loop, which also drives
@@ -2609,6 +2623,7 @@ void AppEmbodyMode::publish_manager_state(uint32_t now)
                 auto o    = arr.add<ArduinoJson::JsonObject>();
                 o["id"]   = embody::appId(s.url);
                 o["name"] = s.name;
+                o["e2e"]  = is_e2e(s.url);  // always said (the setting): the manager resends a marked app that is not
             }
         }
         _mgr_apps.clear();
