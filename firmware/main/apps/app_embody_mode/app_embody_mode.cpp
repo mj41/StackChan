@@ -1767,7 +1767,12 @@ void AppEmbodyMode::wake_screen()
 // Time since someone touched the robot: the screen, the head, or an NFC tag.
 uint32_t AppEmbodyMode::touch_idle_ms()
 {
-    return std::min<uint32_t>(lv_display_get_inactive_time(nullptr), GetHAL().millis() - _last_physical);
+    uint32_t screen = 0;
+    {
+        LvglLockGuard lock;  // also called from the app loop before it takes the lock (update_light)
+        screen = lv_display_get_inactive_time(nullptr);
+    }
+    return std::min<uint32_t>(screen, GetHAL().millis() - _last_physical);
 }
 
 /* --------------------------------- Standby -------------------------------- */
@@ -3074,6 +3079,9 @@ void AppEmbodyMode::connect_server(size_t index)
     _rendered_viewers = 0;
     _qr_visible       = true;
     if (_panel) {
+        // Called from the app loop outside the LVGL lock: unhiding sends LVGL events, and two
+        // tasks inside LVGL events at once corrupt its event list (a panic on the next delete).
+        LvglLockGuard lock;
         _panel->setHidden(false);
     }
     mclog::tagInfo(_tag, "server {}: {}", _servers[index].name, _servers[index].url);

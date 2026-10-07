@@ -288,13 +288,62 @@ index 3692e0c..7bfbc5c 100644
      // Strategy instance
      std::unique_ptr<AssetStrategy> strategy_;
 diff --git a/main/boards/common/i2c_device.cc b/main/boards/common/i2c_device.cc
-index 835997d..ea50d51 100644
+index 835997d..13b9869 100644
 --- a/main/boards/common/i2c_device.cc
 +++ b/main/boards/common/i2c_device.cc
-@@ -32,4 +32,8 @@ uint8_t I2cDevice::ReadReg(uint8_t reg) {
+@@ -1,6 +1,7 @@
+ #include "i2c_device.h"
+ 
+ #include <esp_log.h>
++#include <cstring>
+ 
+ #define TAG "I2cDevice"
+ 
+@@ -19,17 +20,46 @@ I2cDevice::I2cDevice(i2c_master_bus_handle_t i2c_bus, uint8_t addr) {
+     assert(i2c_device_ != NULL);
+ }
+ 
++// A shared bus can time out now and then (another device holding it): such a transfer is tried
++// again, and a lasting failure is logged, not an abort() of the whole robot.
++static constexpr int kAttempts = 3;
++
+ void I2cDevice::WriteReg(uint8_t reg, uint8_t value) {
+     uint8_t buffer[2] = {reg, value};
+-    ESP_ERROR_CHECK(i2c_master_transmit(i2c_device_, buffer, 2, 100));
++    esp_err_t err = ESP_FAIL;
++    for (int i = 0; i < kAttempts && err != ESP_OK; i++) {
++        err = i2c_master_transmit(i2c_device_, buffer, 2, 100);
++    }
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "write reg 0x%02x: %s", reg, esp_err_to_name(err));
++    }
+ }
+ 
+ uint8_t I2cDevice::ReadReg(uint8_t reg) {
+     uint8_t buffer[1];
+-    ESP_ERROR_CHECK(i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, 1, 100));
++    esp_err_t err = ESP_FAIL;
++    for (int i = 0; i < kAttempts && err != ESP_OK; i++) {
++        err = i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, 1, 100);
++    }
++    if (err != ESP_OK) {  // the register's last value read: a made-up 0 may read as an empty battery
++        ESP_LOGE(TAG, "read reg 0x%02x: %s", reg, esp_err_to_name(err));
++        return last_[reg];
++    }
++    last_[reg] = buffer[0];
+     return buffer[0];
+ }
  
  void I2cDevice::ReadRegs(uint8_t reg, uint8_t* buffer, size_t length) {
-     ESP_ERROR_CHECK(i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, length, 100));
+-    ESP_ERROR_CHECK(i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, length, 100));
++    esp_err_t err = ESP_FAIL;
++    for (int i = 0; i < kAttempts && err != ESP_OK; i++) {
++        err = i2c_master_transmit_receive(i2c_device_, &reg, 1, buffer, length, 100);
++    }
++    if (err != ESP_OK) {
++        ESP_LOGE(TAG, "read regs 0x%02x (%u): %s", reg, (unsigned)length, esp_err_to_name(err));
++        memset(buffer, 0, length);
++    }
 +}
 +
 +esp_err_t I2cDevice::TryReadRegs(uint8_t reg, uint8_t* buffer, size_t length, int timeout_ms) {
@@ -302,10 +351,15 @@ index 835997d..ea50d51 100644
  }
 \ No newline at end of file
 diff --git a/main/boards/common/i2c_device.h b/main/boards/common/i2c_device.h
-index 7bc917b..874b137 100644
+index 7bc917b..280df95 100644
 --- a/main/boards/common/i2c_device.h
 +++ b/main/boards/common/i2c_device.h
-@@ -13,6 +13,7 @@ protected:
+@@ -9,10 +9,12 @@ public:
+ 
+ protected:
+     i2c_master_dev_handle_t i2c_device_;
++    uint8_t last_[256] = {};  // ReadReg's last value per register (kept when a read fails)
+ 
      void WriteReg(uint8_t reg, uint8_t value);
      uint8_t ReadReg(uint8_t reg);
      void ReadRegs(uint8_t reg, uint8_t* buffer, size_t length);
@@ -314,7 +368,7 @@ index 7bc917b..874b137 100644
  
  #endif // I2C_DEVICE_H
 diff --git a/main/mcp_server.cc b/main/mcp_server.cc
-index 7cd7ba0..b720a23 100644
+index 7cd7ba0..2d79dd6 100644
 --- a/main/mcp_server.cc
 +++ b/main/mcp_server.cc
 @@ -148,25 +148,8 @@ void McpServer::AddUserOnlyTools() {

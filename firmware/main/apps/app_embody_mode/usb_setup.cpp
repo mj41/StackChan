@@ -605,8 +605,7 @@ static void handle(const std::string& json)
         const int x  = req["x"] | -1;
         const int y  = req["y"] | -1;
         const int ms = std::clamp(req["ms"] | 100, 30, 5000);
-        if (x < 0 || y < 0 || x >= (int)lv_display_get_horizontal_resolution(nullptr) ||
-            y >= (int)lv_display_get_vertical_resolution(nullptr)) {
+        if (x < 0 || y < 0 || x >= 320 || y >= 240) {  // the screen (not asked from LVGL: no lock here)
             return reply_error("x or y outside the screen");
         }
         if (embody::questionOpen() && !_test_taps) {
