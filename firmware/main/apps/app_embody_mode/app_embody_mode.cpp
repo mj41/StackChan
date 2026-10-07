@@ -982,13 +982,12 @@ void AppEmbodyMode::render()
     _code->setText(code.size() == 8 ? code.substr(0, 4) + " " + code.substr(4) : code);
     // The app's server, so you know which one this is (E2E: end-to-end encrypted, TLS: wss).
     const std::string& surl = _servers[_server_index].url;
-    std::string where       = host_port(surl);
-    if (is_e2e(surl) && _e2e_ok) {
-        where += " E2E";
-    } else if (surl.rfind("wss://", 0) == 0) {
-        where += " TLS";
+    // Two lines at most: the host, then the badge and the last command (a third line was cut).
+    std::string second = is_e2e(surl) && _e2e_ok ? "E2E" : surl.rfind("wss://", 0) == 0 ? "TLS" : "";
+    if (!_last_command.empty()) {
+        second += (second.empty() ? "last: " : ", last: ") + _last_command;
     }
-    _detail->setText(_last_command.empty() ? where : where + "\nLast: " + _last_command);
+    _detail->setText(second.empty() ? host_port(surl) : host_port(surl) + "\n" + second);
 }
 
 // Sensor values for the 2 s telemetry. Runs in the app loop, which also drives
