@@ -2642,7 +2642,11 @@ void AppEmbodyMode::publish_status(uint32_t now)
         o["name"]   = e.name;
         o["url"]    = e.url;
         o["origin"] = e.origin;
+        if (is_e2e(e.url)) {
+            o["e2e"] = true;  // end-to-end encrypted (on even when this build cannot: e2e_ok)
+        }
     }
+    doc["e2e_ok"] = _e2e_ok;
     std::string json;
     ArduinoJson::serializeJson(doc, json);
     if (json != _published_status) {
