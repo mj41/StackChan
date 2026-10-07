@@ -302,6 +302,26 @@ void embody::managerLeaving(const std::string& to)
     }
 }
 
+bool embody::addE2EUrl(const std::string& url)
+{
+    Settings settings("embody", true);
+    ArduinoJson::JsonDocument doc;
+    if (ArduinoJson::deserializeJson(doc, settings.GetString("e2e_urls", "[]")) || !doc.is<ArduinoJson::JsonArray>()) {
+        doc.to<ArduinoJson::JsonArray>();
+    }
+    for (const char* u : doc.as<ArduinoJson::JsonArray>()) {
+        if (u && url == u) {
+            return false;
+        }
+    }
+    doc.as<ArduinoJson::JsonArray>().add(url);
+    std::string json;
+    ArduinoJson::serializeJson(doc, json);
+    settings.SetString("e2e_urls", json);
+    mclog::tagInfo(_tag, "e2e on for {} (its manager says so)", url);
+    return true;
+}
+
 void embody::managerChanged()
 {
     if (s_manager_changed) {
@@ -476,6 +496,9 @@ static void handle(const std::string& json)
                 }
                 urls.push_back(o["url"] | "");
                 mclog::tagInfo(_tag, "server {} saved", std::string(o["url"] | ""));
+                if (managed && (o["e2e"] | false)) {
+                    embody::addE2EUrl(o["url"] | "");  // read at start (the setup restarts the robot)
+                }
             }
             if (managed) {
                 keep_only(urls);

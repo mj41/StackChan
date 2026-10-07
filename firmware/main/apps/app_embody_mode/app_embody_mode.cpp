@@ -2504,6 +2504,7 @@ void AppEmbodyMode::apply_signed(const std::string& kind, const std::string& pay
     }
     const std::string current = _servers[_server_index].url;
     const std::string shown   = _servers[_shown_index].url;
+    bool e2e_now              = false;  // the app it is on turns encrypted: reconnect
     std::vector<ServerEntry> next;
     for (const auto& e : _servers) {
         if (e.origin == "built-in") {
@@ -2525,6 +2526,10 @@ void AppEmbodyMode::apply_signed(const std::string& kind, const std::string& pay
         }
         next.erase(std::remove_if(next.begin(), next.end(), [&](const ServerEntry& e) { return e.url == url; }), next.end());
         next.push_back({o["name"] | host_of(url).c_str(), url, token, "manager"});
+        if ((o["e2e"] | false) && embody::addE2EUrl(url)) {  // on, never off (e2ee.md §7)
+            load_e2e_urls();
+            e2e_now = e2e_now || url == current;
+        }
     }
     if (next.empty()) {
         return;
@@ -2549,6 +2554,9 @@ void AppEmbodyMode::apply_signed(const std::string& kind, const std::string& pay
     save_servers();
     announce_servers();
     queue_event("apps_updated", {{"version", (double)version}});
+    if (e2e_now && _e2e_ok) {
+        _pending_switch = _server_index;  // reconnect: Register says e2e, the QR code gets its fragment
+    }
     mclog::tagInfo(_tag, "apps from {}: version {}, {} servers", by, version, _servers.size());
     if (const int p = find_server(pin); p >= 0 && pin != _default_url) {
         if (m.askPin) {

@@ -72,6 +72,13 @@ void onManagerLeaving(std::function<void(const std::string& to)> fn);
 void managerLeaving(const std::string& to);
 
 /**
+ * @brief End-to-end encryption on for this server URL (NVS embody/e2e_urls): a manager's app
+ *        marked "e2e" (home-w42-eu docs/e2ee.md §7). Only on: off is an enrolled browser's.
+ *        Returns true when it was not on before.
+ */
+bool addE2EUrl(const std::string& url);
+
+/**
  * @brief Automation (tests): the app loop stops for this many seconds, as if it hung; the manager
  *        channel then reports it stuck. 0: none pending. Embody Mode takes it in its loop.
  */
