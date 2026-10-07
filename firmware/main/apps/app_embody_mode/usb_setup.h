@@ -85,6 +85,13 @@ bool addE2EUrl(const std::string& url);
 int takeStall();
 
 /**
+ * @brief Test builds only (./container.sh test): a robot command over USB, run by Embody Mode as
+ *        if its app had sent it ({"op":"command","command":"camera","args":{"on":true}}). False
+ *        when none is waiting. Embody Mode takes it in its loop.
+ */
+bool takeTestCommand(std::string& command, std::string& args);
+
+/**
  * @brief The firmware's version as the robot reports it (USB hello, Register): M5Stack's version
  *        it is based on, "mj41" (this fork), and the Embody Mode release from release.sh
  *        ("1.5.1-mj41-v0.3.1"), or "-dev" in an own build. The release's manifest.json says the same.

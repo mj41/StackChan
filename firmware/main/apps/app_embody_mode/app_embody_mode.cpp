@@ -332,6 +332,8 @@ void AppEmbodyMode::onRunning()
             _mgr_use_second = true;
         } else if (nav == 7 || nav == 8) {  // its "Turn manager off" / "Turn manager on"
             _mgr_toggle = nav;
+        } else if (nav == 9) {  // its "Camera: …": the next mode, asked
+            _mgr_cam = true;
         } else if (_servers.size() > 1) {  // Next: only browse, the connection stays
             // The release's empty "Set up: sm.w42.eu" entry only while there is nothing else.
             for (size_t i = 0; i < _servers.size(); i++) {
@@ -409,9 +411,12 @@ void AppEmbodyMode::onRunning()
         send_imu_stream();
     }
 
+    update_privacy();
     if (_snapshot_requested) {
         _snapshot_requested = false;
-        take_snapshot();
+        if (_privacy_blocked.empty()) {
+            take_snapshot();
+        }
     }
     update_leds();
     update_sound();
@@ -433,6 +438,9 @@ void AppEmbodyMode::onRunning()
         run_command(command, args);
     }
     _pending_commands.clear();
+    if (std::string command, args; embody::takeTestCommand(command, args)) {  // test builds over USB
+        run_command(command, args);
+    }
 
     if (_pending_picture) {
         _picture = std::move(_pending_picture);  // keep the pixels alive while shown
@@ -988,6 +996,7 @@ void AppEmbodyMode::render()
 void AppEmbodyMode::add_sensor_telemetry(embody::Client::Telemetry& t)
 {
     car_telemetry(t);
+    t.emplace_back("camera_mic_off", _privacy_blocked.empty() ? 0.0f : 1.0f);  // set on the robot (privacy.h)
     auto round_to = [](float v, float step) { return std::round(v / step) * step; };
 
     ImuSample_t imu;
@@ -1211,7 +1220,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         (args["on"] | false) ? enter_blank(true) : leave_blank();
     } else if (command == "camera") {
         // {"on": true, "size": "320x240" (default) | "640x480"}
-        _camera_on              = args["on"] | false;
+        _camera_on              = (args["on"] | false) && !privacy_refuses(command);
         const std::string size  = args["size"] | "320x240";
         const bool full         = _camera_on && size == "640x480";
         _camera_want_w          = full ? 640 : 320;
@@ -1220,7 +1229,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
         esp_log_level_set("StackChanCamera", _camera_on ? ESP_LOG_ERROR : ESP_LOG_INFO);
         mclog::tagInfo(_tag, "camera {} {}x{}", _camera_on ? "on" : "off", _camera_want_w, _camera_want_h);
     } else if (command == "mic") {
-        (args["on"] | false) ? start_mic() : stop_mic();
+        (args["on"] | false) && !privacy_refuses(command) ? start_mic() : stop_mic();
     } else if (command == "ir_send") {
         // {"raw": "9000,4500,562,..."} marks/spaces in us (+ "carrier_hz"), or NEC {"address", "command"};
         // "loopback": true lets the receiver hear the robot's own signal (self-test).
@@ -1263,7 +1272,7 @@ void AppEmbodyMode::run_command(const std::string& command, const std::string& a
             request_server_change(i, false, _servers[_server_index].name);  // asked on the robot's screen first
         }
     } else if (command == "snapshot") {
-        _snapshot_requested = true;  // taken in the app loop, outside the LVGL lock
+        _snapshot_requested = !privacy_refuses(command);  // taken in the app loop, outside the LVGL lock
     } else if (command == "camera_config") {
         // {"mirror": bool, "flip": bool}: sensor mirror / flip (both default off)
         if (auto camera = hal_bridge::board_get_camera()) {
@@ -2603,6 +2612,10 @@ void AppEmbodyMode::publish_manager_state(uint32_t now)
     doc["conn"]      = _client ? states[(int)_client->state()] : "none";
     doc["firmware"]  = embody::firmwareVersion();
     doc["apps_version"] = embody::loadManager("manager").version;
+    doc["privacy"]      = _privacy.mode == "night" ? "night " + embody::nightText(_privacy) : _privacy.mode;
+    if (!_privacy_blocked.empty()) {
+        doc["camera_mic_off"] = _privacy_blocked;
+    }
     int left               = 0;
     const std::string text = embody::questionText(&left);
     if (!text.empty()) {
@@ -2645,6 +2658,11 @@ void AppEmbodyMode::publish_status(uint32_t now)
     doc["server"]   = _servers[_server_index].url;
     doc["name"]     = _servers[_server_index].name;
     doc["paused"]   = (bool)_input_paused;  // the QR or Manager screen is open: no inputs to the app
+    doc["privacy"]  = _privacy.mode == "night" ? "night " + embody::nightText(_privacy) : _privacy.mode;
+    doc["camera_mic_off"] = !_privacy_blocked.empty();
+    doc["camera"]         = _camera_on;  // streaming now
+    doc["tz"]             = GetHAL().getTimezone();
+    doc["mic"]            = (bool)_mic_running;
     doc["state"]    = _client ? states[(int)_client->state()] : "none";
     doc["status"]   = _client ? _client->statusText() : "";
     doc["qr"]       = _qr_visible;
@@ -2743,11 +2761,82 @@ void AppEmbodyMode::on_server_nav(lv_event_t* e)
     self->_nav_request = action;
 }
 
+// The camera and the microphone as set on the robot (privacy.h), checked every second (and at
+// once after a change): when they turn off, a running camera and microphone stop; every change
+// is reported (event privacy; telemetry camera_mic_off). LVGL lock held.
+void AppEmbodyMode::update_privacy(bool force)
+{
+    const uint32_t now = GetHAL().millis();
+    if (!force && _privacy_known && now - _privacy_at < 1000) {
+        return;
+    }
+    _privacy_at                = now;
+    _privacy                   = embody::loadPrivacy();  // a USB setup may have changed it
+    const std::string blocked  = embody::privacyBlocked(_privacy);
+    if (_privacy_known && blocked == _privacy_blocked) {
+        return;
+    }
+    _privacy_known   = true;
+    _privacy_blocked = blocked;
+    _mgr_rendered_at = 0;
+    if (!blocked.empty()) {
+        if (_camera_on) {
+            _camera_on = false;
+            mclog::tagInfo(_tag, "camera off: {}", blocked);
+        }
+        if (_mic_running) {
+            stop_mic();
+        }
+        _snapshot_requested = false;
+    }
+    queue_event("privacy", {}, {{"camera_mic", blocked.empty() ? "on" : "off"}, {"reason", blocked},
+                                {"mode", _privacy.mode}, {"night", embody::nightText(_privacy)}});
+    mclog::tagInfo(_tag, "camera and microphone {}{}", blocked.empty() ? "allowed" : "off: ", blocked);
+}
+
+// A camera, microphone or snapshot request while they are off on the robot: refused, and said.
+bool AppEmbodyMode::privacy_refuses(const std::string& command)
+{
+    const std::string why = embody::privacyBlocked(embody::loadPrivacy());
+    if (why.empty()) {
+        return false;
+    }
+    queue_event("privacy_refused", {}, {{"command", command}, {"reason", why}});
+    mclog::tagInfo(_tag, "{} refused: camera and microphone {}", command, why);
+    return true;
+}
+
 // The Manager screen (the QR screen's gear): which manager, connected or not, its page's address
 // with a QR code (a phone on the home Wi-Fi opens it), and "Use <the second>" when the USB setup
 // allowed the second manager to become the primary (asked on the screen). LVGL lock held.
 void AppEmbodyMode::update_manager_screen()
 {
+    // The camera and the microphone: on -> night -> off -> on, each asked on the screen.
+    if (_mgr_cam.exchange(false) && !_mgr_cam_answer) {
+        _mgr_cam_next = _privacy.mode == "on" ? "night" : _privacy.mode == "night" ? "off" : "on";
+        _mgr_cam_answer = std::make_shared<std::atomic<int>>(0);
+        const std::string night = embody::nightText(_privacy);
+        embody::askOnScreen(_mgr_cam_next == "on"      ? "Camera and microphone on?"
+                            : _mgr_cam_next == "night" ? "Camera and microphone off at night?"
+                                                       : "Camera and microphone off?",
+                            _mgr_cam_next == "on" ? "Apps may then use them again (the LIVE badge shows when they do)."
+                            : _mgr_cam_next == "night"
+                                ? "Off " + night + " (the robot's time zone), on by day. Night hours change over USB."
+                                : "No app, manager or browser can turn them on. Only here, or over USB.",
+                            60, [answer = _mgr_cam_answer](bool yes) { *answer = yes ? 1 : -1; });
+    }
+    if (_mgr_cam_answer && *_mgr_cam_answer != 0) {
+        const bool yes = *_mgr_cam_answer == 1;
+        _mgr_cam_answer.reset();
+        if (yes) {
+            embody::Privacy p = embody::loadPrivacy();
+            p.mode            = _mgr_cam_next;
+            embody::savePrivacy(p);
+            mclog::tagInfo(_tag, "camera and microphone: {} (on the screen)", p.mode);
+            update_privacy(true);
+        }
+        _mgr_rendered_at = 0;
+    }
     if (_mgr_use_second.exchange(false) && !_mgr_answer) {
         const auto second = embody::loadManager("manager2");
         if (second.valid() && second.mayPrimary) {
@@ -2840,8 +2929,7 @@ void AppEmbodyMode::update_manager_screen()
         _mgr_panel->setPadding(0, 0, 0, 0);
         _mgr_panel->removeFlag(LV_OBJ_FLAG_SCROLLABLE);
         lv_obj_t* p = _mgr_panel->get();
-        lv_obj_t* t = label(p, &lv_font_montserrat_20, _color_text, 12, 14, 110);
-        lv_label_set_text(t, "Manager");
+        _mgr_cam_btn    = button(p, "", 6, 4, 112, 9);  // the camera and microphone (privacy.h)
         _mgr_toggle_btn = button(p, "", 122, 4, 100, 7);
         button(p, "Back", 226, 4, 88, 5);
         _mgr_name  = label(p, &lv_font_montserrat_20, _color_text, 12, 52, 300);
@@ -2873,6 +2961,8 @@ void AppEmbodyMode::update_manager_screen()
         return;
     }
     _mgr_rendered_at = now ? now : 1;
+    lv_label_set_text(lv_obj_get_child(_mgr_cam_btn, 0),
+                      _privacy.mode == "on" ? "Camera on" : _privacy.mode == "night" ? "Cam. night" : "Camera off");
     const auto m      = embody::loadManager("manager");
     const auto second = embody::loadManager("manager2");
     if (!m.valid()) {
@@ -2884,7 +2974,7 @@ void AppEmbodyMode::update_manager_screen()
         lv_obj_add_flag(_mgr_toggle_btn, LV_OBJ_FLAG_HIDDEN);
         return;
     }
-    lv_label_set_text(_mgr_name, m.name.empty() ? m.id.c_str() : m.name.c_str());
+    lv_label_set_text(_mgr_name, ("Manager: " + (m.name.empty() ? m.id : m.name)).c_str());
     const std::string err = _channel.lastError();
     lv_label_set_text(_mgr_state, !m.enabled ? "off: apps only over USB"
                                   : _channel.connected() ? LV_SYMBOL_OK " connected"

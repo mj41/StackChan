@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: MIT
  */
 #include "usb_setup.h"
+#include "privacy.h"
 #include "managers.h"
 #include "../common/home_indicator/home_indicator.h"
 #include "automation.h"
@@ -285,6 +286,21 @@ int embody::takeStall()
     return s_stall.exchange(0);
 }
 
+static std::mutex s_test_cmd_mutex;
+static std::string s_test_cmd, s_test_args;
+
+bool embody::takeTestCommand(std::string& command, std::string& args)
+{
+    std::lock_guard<std::mutex> lock(s_test_cmd_mutex);
+    if (s_test_cmd.empty()) {
+        return false;
+    }
+    command = std::move(s_test_cmd);
+    args    = std::move(s_test_args);
+    s_test_cmd.clear();
+    return true;
+}
+
 void embody::onManagerChanged(std::function<void()> fn)
 {
     s_manager_changed = std::move(fn);
@@ -522,6 +538,29 @@ static void handle(const std::string& json)
             applied.add("autostart");
         }
 #endif
+        // The camera and the microphone (privacy.h): {"mode": "on" | "night" | "off", "night":
+        // "22:00-07:00"}. Over USB: the person has the robot in hand, as on its Manager screen.
+        if (req["privacy"].is<ArduinoJson::JsonObject>()) {
+            embody::Privacy p      = embody::loadPrivacy();
+            const std::string mode = req["privacy"]["mode"] | p.mode;
+            const std::string win  = req["privacy"]["night"] | "";
+            if ((mode != "on" && mode != "off" && mode != "night") || (!win.empty() && !embody::parseNight(win, p))) {
+                return reply_error("privacy: {mode: on | night | off, night: \"22:00-07:00\"}");
+            }
+            p.mode = mode;
+            embody::savePrivacy(p);
+            applied.add("privacy");
+            mclog::tagInfo(_tag, "camera and microphone: {} (night {}) over USB", p.mode, embody::nightText(p));
+        }
+        // The time zone (POSIX TZ, e.g. "CET-1CEST,M3.5.0,M10.5.0/3"): the robot's clock and its
+        // night hours (privacy.h). The setup page sends the browser's.
+        if (const std::string tz = req["tz"] | ""; !tz.empty()) {
+            if (tz.size() > 64 || tz.find_first_of("\r\n\"") != std::string::npos) {
+                return reply_error("tz: a POSIX TZ string, e.g. CET-1CEST,M3.5.0,M10.5.0/3");
+            }
+            GetHAL().setTimezone(tz);
+            applied.add("tz");
+        }
         const std::string ssid = req["wifi"]["ssid"] | "";
         if (!ssid.empty()) {
             SsidManager::GetInstance().AddSsid(ssid, req["wifi"]["password"] | "");
@@ -593,6 +632,21 @@ static void handle(const std::string& json)
         }
         swipe(res, req["x0"] | 160, req["y0"] | 236, req["x1"] | 160, req["y1"] | 150, std::clamp(req["ms"] | 300, 50, 2000));
         mclog::tagInfo(_tag, "swipe over USB");
+        return reply(res);
+    }
+    if (op == "command") {  // test builds only: a robot command as if from the app (privacy tests, …)
+        if (!_test_taps) {
+            return reply_error("command: test builds only");
+        }
+        std::string args;
+        ArduinoJson::serializeJson(req["args"], args);
+        {
+            std::lock_guard<std::mutex> lock(s_test_cmd_mutex);
+            s_test_cmd  = req["command"] | "";
+            s_test_args = args == "null" ? "{}" : args;
+        }
+        mclog::tagInfo(_tag, "test command over USB: {}", std::string(req["command"] | ""));
+        res["ok"] = true;
         return reply(res);
     }
     if (op == "stall") {  // {"seconds": 1..120}: the app loop stops (tests of the manager channel)

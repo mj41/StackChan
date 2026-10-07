@@ -7,6 +7,7 @@
 #include "embody_client.h"
 #include "manager_channel.h"
 #include "e2e.h"
+#include "privacy.h"
 #include "asset_store.h"
 #include "sprite_layer.h"
 #include "sample_ring.h"
@@ -113,6 +114,15 @@ private:
     std::shared_ptr<std::atomic<int>> _mgr_answer;
     uint32_t _mgr_rendered_at = 0;
     uint32_t _mgr_state_at = 0;
+    // The camera and the microphone, as set on the robot (privacy.h): checked every second.
+    embody::Privacy _privacy;
+    std::string _privacy_blocked;  // why they are off now, or ""
+    bool _privacy_known = false;   // the first check after start is done (it reports)
+    uint32_t _privacy_at = 0;
+    lv_obj_t* _mgr_cam_btn = nullptr;  // "Camera: on" / "Camera: night" / "Camera: off"
+    std::atomic<bool> _mgr_cam{false};  // tapped: the next mode, asked on the screen
+    std::string _mgr_cam_next;
+    std::shared_ptr<std::atomic<int>> _mgr_cam_answer;
     uint32_t _mgr_apps_rev = UINT32_MAX;
     std::string _mgr_apps;       // its apps as {id, name}, for the channel's Hello
     std::string _switch_answer;  // the last answer to a switch: switched, not confirmed, refused: …
@@ -393,6 +403,8 @@ private:
     void apply_signed(const std::string& kind, const std::string& payload);
     void publish_manager_state(uint32_t now);
     void update_manager_screen();
+    void update_privacy(bool force = false);
+    bool privacy_refuses(const std::string& command);
     std::string shown_name(size_t index);  // the name on screen: with its manager when two share it
     void announce_servers();
     void render_server_row();
